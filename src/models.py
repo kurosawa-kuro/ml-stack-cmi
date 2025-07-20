@@ -23,6 +23,17 @@ from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+# Configuration-driven imports
+try:
+    from .config import get_project_config, should_use_single_algorithm, get_primary_algorithm
+    CONFIG_AVAILABLE = True
+except ImportError:
+    try:
+        from config import get_project_config, should_use_single_algorithm, get_primary_algorithm
+        CONFIG_AVAILABLE = True
+    except ImportError:
+        CONFIG_AVAILABLE = False
+
 try:
     from .validation import (
         CVLogger,
@@ -47,19 +58,30 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-# LightGBM default parameters matching design specification
-LIGHTGBM_PARAMS = {
-    "objective": "binary",
-    "metric": "binary_logloss",
-    "boosting_type": "gbdt",
-    "num_leaves": 31,
-    "learning_rate": 0.1,
-    "feature_fraction": 0.8,
-    "bagging_fraction": 0.8,
-    "bagging_freq": 5,
-    "verbose": -1,
-    "random_state": 42,
-}
+# Configuration-driven parameter loading
+def get_lightgbm_params() -> Dict[str, Any]:
+    """Get LightGBM parameters from configuration"""
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        return config.get_model_params("lightgbm")
+    else:
+        # Fallback to default parameters
+        return {
+            "objective": "multiclass",
+            "num_class": 18,
+            "metric": "multi_logloss",
+            "boosting_type": "gbdt",
+            "num_leaves": 31,
+            "learning_rate": 0.1,
+            "feature_fraction": 0.8,
+            "bagging_fraction": 0.8,
+            "bagging_freq": 5,
+            "verbose": -1,
+            "random_state": 42,
+        }
+
+# Legacy parameter dict for backward compatibility
+LIGHTGBM_PARAMS = get_lightgbm_params()
 
 
 class LightGBMModel:

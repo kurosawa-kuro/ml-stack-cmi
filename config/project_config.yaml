@@ -1,0 +1,174 @@
+# CMI Competition Project Configuration
+# Configuration-driven development for flexible phase management
+
+project:
+  name: "cmi-detect-behavior-with-sensor-data"
+  phase: "baseline"  # baseline, optimization, ensemble
+  version: "0.1.0"
+  
+  # Algorithm strategy based on current phase
+  algorithms:
+    primary: "lightgbm"
+    enabled: ["lightgbm"]  # baseline phase: single algorithm focus
+    ensemble_enabled: false
+    
+    # Phase-specific algorithm configurations
+    phases:
+      baseline:
+        enabled: ["lightgbm"]
+        ensemble_enabled: false
+        focus: "single_algorithm_mastery"
+      optimization:
+        enabled: ["lightgbm", "xgboost"]
+        ensemble_enabled: false
+        focus: "hyperparameter_tuning"
+      ensemble:
+        enabled: ["lightgbm", "xgboost", "catboost", "cnn"]
+        ensemble_enabled: true
+        focus: "model_diversity"
+
+competition:
+  name: "CMI - Detect Behavior with Sensor Data"
+  url: "https://www.kaggle.com/competitions/cmi-detect-behavior-with-sensor-data"
+  deadline: "2025-08-26"
+  
+  # Target scores by phase
+  targets:
+    baseline:
+      cv_score: 0.50
+      lb_score: 0.50
+      percentile: 70  # Top 70%
+    optimization:
+      cv_score: 0.57
+      lb_score: 0.56
+      percentile: 65  # Top 65%
+    ensemble:
+      cv_score: 0.62
+      lb_score: 0.60
+      percentile: 60  # Bronze medal (Top 60%)
+
+training:
+  # Cross-validation strategy
+  cv_strategy: "groupkfold"
+  cv_folds: 5
+  group_column: "participant_id"  # Critical for CMI data
+  
+  # Optimization settings
+  optimization:
+    framework: "optuna"
+    trials: 100
+    timeout_minutes: 60
+    
+  # Model-specific parameters
+  lightgbm:
+    objective: "multiclass"
+    metric: "multi_logloss"
+    num_class: 18  # CMI gesture classes
+    boosting_type: "gbdt"
+    num_leaves: 31
+    learning_rate: 0.1
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 5
+    verbose: -1
+    random_state: 42
+
+data:
+  # Data source configuration
+  source:
+    type: "duckdb"
+    path: "data/kaggle_datasets.duckdb"
+    
+  # Medallion architecture settings
+  medallion:
+    bronze_schema: "bronze"
+    silver_schema: "silver" 
+    gold_schema: "gold"
+    
+  # Sensor data configuration
+  sensors:
+    accelerometer: ["acc_x", "acc_y", "acc_z"]
+    gyroscope: ["rot_w", "rot_x", "rot_y", "rot_z"]
+    thermopile: ["thm_1", "thm_2", "thm_3", "thm_4", "thm_5"]
+    tof_sensors: ["tof_1", "tof_2", "tof_3", "tof_4", "tof_5"]
+    
+  # Missing value handling
+  missing_strategy:
+    thm_5_threshold: 0.06  # 5.79% missing rate
+    tof_5_threshold: 0.06  # 5.24% missing rate
+    create_indicators: true
+    imputation_method: "median"
+
+features:
+  # Feature engineering configuration
+  engineering:
+    time_series: true
+    frequency_domain: true
+    multimodal_fusion: true
+    
+  # tsfresh settings
+  tsfresh:
+    enabled: true
+    parameters: "comprehensive"  # comprehensive, minimal, efficient
+    chunk_size: 1000
+    
+  # Selection strategy
+  selection:
+    method: "sensor_priority"  # sensor_priority, statistical, mutual_info
+    max_features: 100
+    
+evaluation:
+  # Metrics configuration
+  primary_metric: "composite_f1"  # 0.5 * (Binary F1 + Macro F1)
+  
+  metrics:
+    binary_f1: true
+    macro_f1: true
+    micro_f1: false
+    accuracy: true
+    auc_roc: true
+    
+  # Validation settings
+  validation:
+    holdout_size: 0.2
+    stratify: true
+    
+output:
+  # Output directory management
+  base_dir: "outputs"
+  
+  directories:
+    models: "outputs/models"
+    submissions: "outputs/submissions"
+    reports: "outputs/reports"
+    figures: "outputs/figures"
+    logs: "outputs/logs"
+    
+  # File naming conventions
+  naming:
+    timestamp_format: "%Y%m%d_%H%M%S"
+    include_score: true
+    include_phase: true
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  handlers:
+    console: true
+    file: true
+    file_path: "outputs/logs/project.log"
+    
+resources:
+  # Computational resource limits
+  memory:
+    max_gb: 16
+    warning_threshold: 12
+    
+  cpu:
+    max_cores: 8
+    parallel_jobs: 4
+    
+  gpu:
+    enabled: false
+    device_id: 0

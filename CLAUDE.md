@@ -11,7 +11,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Deadline**: August 26, 2025 (~5 weeks remaining)
 
 ## 【CRITICAL - CURRENT PROJECT STATE】
-### Initial Setup Stage
+### Configuration-Driven Development
+**Strategy Control**: Project phase and algorithms are controlled via configuration files and environment variables:
+- **Config File**: `config/project_config.yaml` - Main project settings
+- **Environment**: `.env` - Environment-specific variables
+- **Dynamic Loading**: `src/config/strategy.py` - Phase-aware strategy system
+
+**Current Phase**: `${PROJECT_PHASE}` (baseline/optimization/ensemble)
+
+### BASELINE PHASE - Single Algorithm Focus
+**When PROJECT_PHASE=baseline**: This project implements a **configuration-driven single algorithm approach** for bronze medal achievement.
+
+**Configuration-Controlled Strategy**:
+- **Primary Algorithm**: `${PRIMARY_ALGORITHM}` (from config)
+- **Ensemble Mode**: `${ENSEMBLE_ENABLED}` (disabled in baseline)
+- **Target Score**: `${TARGET_CV_SCORE}` (phase-specific)
+- **Algorithm List**: `${ENABLED_ALGORITHMS}` (single in baseline)
+
+**Benefits of Configuration-Driven Approach**:
+- **Flexible Phase Management**: Switch strategies via config change only
+- **Environment Separation**: Different settings for dev/prod
+- **Team Coordination**: Shared strategy without code conflicts
+- **CI/CD Ready**: Automated pipeline configuration
+
+### Competition Overview
 - **Competition Type**: Time-series multimodal sensor classification
 - **Data Scale**: ~200 participants × hundreds of sessions (~1.5 GB)
 - **Sensor Channels**: IMU (acc/gyro), ToF distance (4ch), Thermopile temperature (5ch)
@@ -26,23 +49,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 【DATA STRUCTURE】Multimodal Sensor Stream
 
-### Raw Data Schema
+### Raw Data Schema (EDA Verified)
 ```
 Sensor Data (50 Hz sampling):
 ├── timestamp                 # Time reference
-├── acc_x, acc_y, acc_z      # Accelerometer (IMU)
-├── gyro_x, gyro_y, gyro_z   # Gyroscope (IMU)
-├── tof_0, tof_1, tof_2, tof_3  # Time-of-Flight distance sensors
-├── thermopile_0...4         # Temperature array sensors
-├── participant_id           # Subject identifier (GroupKFold key)
-├── series_id               # Session identifier
-└── label                   # Target: BFRB behavior class
+├── acc_x, acc_y, acc_z      # Accelerometer (IMU) - 0% missing
+├── rot_w, rot_x, rot_y, rot_z  # Rotation quaternions - 0.64% missing
+├── thm_1, thm_2, thm_3, thm_4  # Thermopile sensors - 1-2% missing  
+├── thm_5                    # Thermopile sensor 5 - 5.79% missing (critical)
+├── tof_1..4_v0..63         # ToF distance arrays (64ch each) - 1% missing
+├── tof_5_v0..63            # ToF distance array 5 - 5.24% missing (critical)
+├── participant_id          # Subject identifier (81 participants, GroupKFold key)
+├── series_id              # Session identifier (8,151 sequences)
+└── label                  # Target: BFRB behavior class (18 gestures)
 ```
 
-### Target Labels
-- **Binary Task**: BFRB present (1) vs absent (0)
-- **Multi-class Task**: Specific BFRB gesture types
-- **Evaluation**: Combined F1 score requiring balance between both tasks
+### EDA Findings - Data Quality
+**Reference**: [EDA Results](docs/project-info/EDA結果.md)
+- **Train Data**: 574,945 rows, 81 participants, 8,151 sequences
+- **Test Data**: 107 rows, 2 participants, 2 sequences  
+- **Average Sequence Duration**: 1.41 seconds (70.5 samples at 50Hz)
+- **Critical Missing Sensors**: thm_5 (5.79%) and tof_5 (5.24%) - 94% co-occurrence
+- **Problematic Participants**: SUBJ_044680 and SUBJ_016552 with 100% missing for sensors 5
+
+### Target Labels Distribution
+- **Binary Task**: Target 59.84% vs Non-Target 40.16%
+- **Multi-class Task**: 18 gesture classes with 5.9:1 imbalance ratio
+- **Most Frequent**: "Text on phone" (10.17%)
+- **Least Frequent**: "Pinch knee/leg skin" (1.71%)
+- **Evaluation**: 0.5 × (Binary F1 + Macro F1) composite score
 
 ## 【MEDALLION ARCHITECTURE】Adapted for Time-Series
 
@@ -322,24 +357,32 @@ X_train, y_train, X_test = get_ml_ready_data()
 ## 【SENSOR PROCESSING GUIDELINES】
 
 ### Bronze Layer - Sensor Data Quality
-**Core Processing:**
-- IMU normalization (Z-score per channel)
-- ToF missing value handling (0-fill or masking)
-- Thermopile noise reduction
-- Timestamp validation (50Hz consistency)
-- Participant grouping for CV
+**Core Processing (EDA-Informed):**
+- IMU normalization (Z-score per channel) - High reliability sensors
+- **Critical Missing Value Handling**:
+  - thm_5: 5.79% missing (forward fill or median imputation)
+  - tof_5: 5.24% missing (co-occurring with thm_5)
+  - Create missing indicators: `thm_5_available`, `tof_5_available`
+- Thermopile noise reduction and outlier detection
+- Timestamp validation (50Hz consistency across 1.41s sequences)
+- **Participant grouping for CV**: 81 participants → 5-fold = ~16 participants per fold
 
-### Silver Layer - Feature Engineering
-**Time-Series Features:**
-- Statistical features (tsfresh integration)
-- FFT/frequency domain analysis
-- Cross-modal sensor correlations
-- Temporal pattern detection
+### Silver Layer - Feature Engineering (EDA-Optimized)
+**Priority 1 Features (EDA-Verified High Impact):**
+- **IMU Engineering**: `acc_magnitude = sqrt(acc_x² + acc_y² + acc_z²)`
+- **Motion Derivatives**: velocity (diff), jerk (diff²) for gesture detection
+- **Rolling Statistics**: mean/std/min/max over 5,10,20 timesteps (1.41s sequences)
+- **Missing Value Indicators**: Binary flags for sensor availability
 
-**Domain-Specific Features:**
-- Movement patterns (IMU autocorrelation)
-- Proximity patterns (ToF distance tracking)
-- Thermal signatures (temperature gradients)
+**Priority 2 Features (Frequency Domain):**
+- **FFT Analysis**: Spectral energy in bands [0-2Hz, 2-5Hz, 5-10Hz, 10-25Hz]
+- **ToF Dimensionality Reduction**: PCA to 8-16 components per 64-channel sensor
+- **Cross-modal Correlations**: IMU-Thermopile, IMU-ToF fusion features
+
+**Domain-Specific BFRB Features:**
+- **Gesture-Specific Patterns**: Hand-to-face proximity (ToF), contact temperature (Thermopile)
+- **Behavioral Signatures**: Repetitive motion detection, touch vs non-touch classification
+- **18-Class Specialization**: Features targeting top gestures ("Text on phone", "Neck scratch")
 
 ### Gold Layer - Model Preparation
 **Data Formats:**
@@ -349,15 +392,26 @@ X_train, y_train, X_test = get_ml_ready_data()
 
 ## 【MODEL IMPLEMENTATION】
 
-### Primary Model: LightGBM
-- **Implementation**: `src/models.py`
-- **Features**: Supports cross-validation, hyperparameter optimization
-- **Integration**: Works with medallion pipeline gold layer output
+### Configuration-Driven Model Selection
+- **Implementation**: `src/models.py` with `src/config/strategy.py` integration
+- **Dynamic Parameters**: Model parameters loaded from `config/project_config.yaml`
+- **Phase-Aware**: Algorithm selection based on `PROJECT_PHASE` environment variable
+- **Baseline Focus**: Single algorithm when `PROJECT_PHASE=baseline`
 
-### Training Configuration
-- **CV Strategy**: GroupKFold by participant_id (mandatory)
-- **Optimization**: Optuna integration available
-- **Metrics**: Binary F1 + Macro F1 composite scoring
+**Model Configuration System**:
+```python
+from src.config import get_project_config, get_primary_algorithm
+config = get_project_config()
+model_params = config.get_model_params("lightgbm")
+enabled_algorithms = config.get_enabled_algorithms()
+```
+
+### Training Configuration (Configuration-Driven)
+- **Algorithm Selection**: Controlled by `config/project_config.yaml`
+- **Phase Management**: `baseline` → `optimization` → `ensemble`
+- **CV Strategy**: `${CV_STRATEGY}` by `${GROUP_COLUMN}` (from config)
+- **Parameters**: Dynamic loading from config files
+- **Validation**: Configuration validation with warning system
 
 ## 【TESTING & CODE QUALITY】
 
@@ -386,89 +440,83 @@ make format              # black code formatting
 3. **Balanced Metrics**: Monitor Binary F1 and Macro F1 separately
 4. **Window Engineering**: Behavior duration varies - try multiple window sizes
 
-### Time-Series Specific Considerations
-- **Window Size**: Start with 2-5 second windows (100-250 samples)
-- **Overlap**: 50-80% overlap for training, less for inference
-- **Normalization**: Per-participant or per-session normalization
-- **Augmentation**: Time-based augmentations preserve sensor relationships
+### Time-Series Specific Considerations (EDA-Calibrated)
+- **Window Size**: EDA shows 1.41s average sequences → use 1-3 second windows (50-150 samples)
+- **Overlap**: 50-80% overlap for training (accommodates short sequences)
+- **Normalization**: Per-participant recommended (81 participants with individual differences)
+- **Class Imbalance**: 5.9:1 ratio requires focal loss or weighted sampling
+- **Augmentation**: Preserve sensor relationships across IMU+ToF+Thermopile modalities
 
-### Common Pitfalls to Avoid
-- Using standard KFold instead of GroupKFold
-- Ignoring sensor-specific preprocessing needs
-- Over-focusing on one modality (e.g., IMU only)
-- Not handling missing ToF/Thermal values properly
+### Common Pitfalls to Avoid (EDA-Informed)
+- Using standard KFold instead of GroupKFold (81 participants must be split properly)
+- **Critical**: Ignoring thm_5 and tof_5 missing patterns (5-6% missing, co-occurring)
+- Over-focusing on IMU only (missing ToF proximity and Thermopile contact signals)
+- **Class Imbalance**: Not addressing 5.9:1 ratio between most/least frequent gestures
+- **Problematic Participants**: Not handling SUBJ_044680/SUBJ_016552 with 100% missing sensors
 
 ## 【BRONZE MEDAL ROADMAP】5-Week Detailed Plan
 
 ### Week 1: Foundation & Baseline (Target: LB 0.50+)
 
-#### Day 1-2: Data Understanding & EDA
-**Data Structure Analysis:**
-- Analyze train.csv, test.csv structure and memory usage
-- Understand sensor channel meanings:
-  - IMU (accelerometer/gyroscope): Body movement detection
-  - ToF: Hand-to-face distance measurement  
-  - Thermopile: Temperature distribution (facial contact detection)
+#### Day 1-2: Data Understanding & EDA ✅ COMPLETED
+**EDA Results Summary** (Reference: [EDA結果.md](docs/project-info/EDA結果.md)):
+- **Data Scale**: 574,945 train rows, 81 participants, 8,151 sequences
+- **Sensor Analysis**: IMU (reliable), ToF/Thermopile (some missing patterns identified)
+- **Critical Finding**: thm_5 (5.79%) and tof_5 (5.24%) missing with 94% co-occurrence
+- **Target Distribution**: Binary 59.84% vs 40.16%, Multi-class 5.9:1 imbalance
+- **Sequence Length**: Average 1.41s (70.5 samples at 50Hz)
+- **Problematic Cases**: 2 participants with 100% missing sensor 5 data
 
-**Statistical Analysis:**
-- Verify sensor value ranges and distributions
-- Analyze missing value patterns (especially ToF/temperature sensors)
-- Check participant data volume consistency
-- Evaluate behavior label distribution and class imbalance
+#### Day 3-4: Preprocessing Pipeline (EDA-Optimized)
+**Missing Value Strategy (Critical for sensors 5):**
+- **thm_5**: Forward fill or median imputation from thm_1-4
+- **tof_5**: PCA-based reconstruction or zero-fill with availability flag
+- **Create Indicators**: `thm_5_available`, `tof_5_available` binary features
+- **Participant Exclusion**: Consider excluding SUBJ_044680/SUBJ_016552 if problematic
 
-**Time-Series Visualization:**
-- Plot sensor waveform patterns for each behavior class
-- Validate 50Hz sampling rate consistency
-- Assess noise levels across sensor modalities
+**Normalization (Per-Participant Recommended):**
+- Z-score normalization for IMU data (per participant to handle individual differences)
+- Thermopile: Per-participant baseline temperature correction
+- ToF: Per-participant distance calibration
 
-#### Day 3-4: Preprocessing Pipeline
-**Data Cleaning:**
-- Implement anomaly detection and handling strategies
-- Missing value handling:
-  - IMU: Linear interpolation
-  - ToF/Temperature: Zero-fill or forward fill
-- Validate timestamp continuity
+**Segmentation (Sequence-Aware):**
+- **Window Size**: 1.5-second windows (75 samples) to match 1.41s average
+- 70% overlap for training (accommodate short sequences)
+- Label assignment: Majority vote within window
 
-**Normalization:**
-- Z-score normalization for IMU data
-- Compare participant-level vs global normalization
-- Define sensor-specific normalization strategies
+#### Day 5-6: Feature Engineering (EDA-Priority Based)
+**Priority 1 - Essential Features:**
+- **IMU Magnitude**: `acc_magnitude = sqrt(acc_x² + acc_y² + acc_z²)`
+- **Motion Derivatives**: velocity (diff), jerk (diff²) - critical for gesture detection
+- **Rolling Statistics**: mean/std/min/max over 5,10,20 timesteps (optimized for 1.41s sequences)
+- **Missing Indicators**: Binary flags for sensor 5 availability
 
-**Segmentation:**
-- Fixed window segmentation (e.g., 2-second = 100 samples)
-- 50% overlap for training data
-- Label assignment strategy (majority vote or center value)
+**Priority 2 - Advanced Features:**
+- **tsfresh Integration**: ComprehensiveFCParameters (monitor memory with 574K rows)
+- **FFT Spectral**: Energy bands [0-2Hz, 2-5Hz, 5-10Hz, 10-25Hz] for gesture frequency
+- **ToF PCA**: Reduce 64 channels to 8-16 components per sensor
 
-#### Day 5-6: Feature Engineering
-**tsfresh Integration:**
-- Install and configure tsfresh with ComprehensiveFCParameters
-- Monitor computation time and memory usage
-- Extract comprehensive time-series features
+**BFRB-Specific Features:**
+- **Proximity**: min(tof_channels) for hand-to-face distance
+- **Contact Detection**: Thermopile spike detection for touch events
+- **Top Gesture Features**: Specialized for "Text on phone" (10.17%), "Neck scratch" (9.85%)
 
-**Statistical Features:**
-- Window-based statistics (mean, std, min/max)
-- Cross-sensor correlation features
-- Rate of change and jerk (acceleration derivative)
+#### Day 7: Baseline Model Construction (EDA-Informed)
+**GroupKFold Implementation (Critical for 81 participants):**
+- **Group Splitting**: 81 participants → 5 folds = ~16 participants per fold
+- **Validation**: Ensure no participant overlap between train/validation
+- **Class Distribution**: Handle 5.9:1 imbalance across folds
 
-**Frequency Domain:**
-- FFT-based spectral features
-- Power spectral density analysis
-- Dominant frequency component extraction
+**LightGBM Baseline (Class-Aware):**
+- **Class Weights**: Implement for 5.9:1 imbalance ratio
+- **Dual Model Strategy**: Binary classifier + 18-class multiclass
+- **Evaluation**: 0.5 × (Binary F1 + Macro F1) composite metric
+- **Missing Handling**: Utilize `thm_5_available`, `tof_5_available` features
 
-#### Day 7: Baseline Model Construction
-**GroupKFold Implementation:**
-- Participant-based group splitting to prevent leakage
-- 5-fold configuration with data leak verification
-- Validate class distribution across folds
-
-**LightGBM Baseline:**
-- Basic parameter configuration
-- Separate Binary/Multiclass model construction
-- Implement evaluation metrics (F1 score calculation)
-
-**Initial Submission:**
-- Generate predictions and create submission.csv
-- Submit to Kaggle and verify score
+**Expected Initial Results:**
+- **Target CV**: 0.50-0.52 (baseline with essential features)
+- **Target LB**: 0.50-0.51 (accounting for potential CV-LB gap)
+- **Success Criteria**: Both Binary F1 and Macro F1 > 0.45 individually
 
 ### Week 2: Model Enhancement (Target: LB 0.57-0.60)
 
