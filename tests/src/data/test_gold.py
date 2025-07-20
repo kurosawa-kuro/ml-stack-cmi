@@ -1,6 +1,7 @@
 """
-Refactored Test for Gold Level Data Functions
-Uses common fixtures and utilities from conftest.py
+Test for Gold Layer Data Functions - CMI Sensor Data
+Tests ML-ready data preparation with GroupKFold support
+CLAUDE.md: Gold layer tests for BFRB detection with participant-based CV
 """
 
 import tempfile
@@ -13,15 +14,19 @@ import pytest
 from sklearn.preprocessing import PolynomialFeatures
 
 from src.data.gold import (
-    encode_target, 
-    prepare_model_data,
-    clean_and_validate_features,
-    select_best_features,
-    get_ml_ready_data,
-    create_submission,
+    encode_bfrb_target, 
+    prepare_ml_ready_data,
+    clean_and_validate_sensor_features,
+    select_sensor_features,
+    get_ml_ready_sequences,
+    create_submission_dataframe,
     load_gold_data,
     create_gold_tables,
-    get_feature_names
+    get_sensor_feature_names,
+    setup_groupkfold_cv,
+    create_sequence_windows,
+    create_submission_format,
+    extract_model_arrays
 )
 
 # Import common fixtures and utilities
@@ -35,49 +40,129 @@ from tests.conftest import (
 )
 
 
-class TestGoldFunctions:
-    """Gold level function tests using common fixtures"""
+@pytest.fixture
+def sample_cmi_data():
+    """Create sample CMI sensor data for testing"""
+    return pd.DataFrame({
+        'id': range(1, 101),
+        'participant_id': np.repeat(range(1, 21), 5),  # 20 participants, 5 samples each
+        'series_id': range(1, 101),
+        'timestamp': pd.date_range('2024-01-01', periods=100, freq='20ms'),  # 50Hz
+        # IMU sensor data
+        'acc_x': np.random.normal(0, 1, 100),
+        'acc_y': np.random.normal(0, 1, 100),
+        'acc_z': np.random.normal(9.8, 1, 100),
+        'rot_x': np.random.normal(0, 0.1, 100),
+        'rot_y': np.random.normal(0, 0.1, 100),
+        'rot_z': np.random.normal(0, 0.1, 100),
+        # ToF distance sensors
+        'tof_0': np.random.uniform(50, 500, 100),
+        'tof_1': np.random.uniform(50, 500, 100),
+        'tof_2': np.random.uniform(50, 500, 100),
+        'tof_3': np.random.uniform(50, 500, 100),
+        # Thermopile temperature sensors
+        'thm_0': np.random.normal(25, 2, 100),
+        'thm_1': np.random.normal(25, 2, 100),
+        'thm_2': np.random.normal(25, 2, 100),
+        'thm_3': np.random.normal(25, 2, 100),
+        'thm_4': np.random.normal(25, 2, 100),
+        # Target labels
+        'label': np.random.choice(['no_behavior', 'behavior_1', 'behavior_2'], 100)
+    })
 
-    def test_prepare_model_data_basic(self, sample_gold_data):
-        """Test basic model data preparation using common test data"""
-        result = prepare_model_data(sample_gold_data)
+
+@pytest.fixture
+def sample_processed_cmi_data():
+    """Create sample processed CMI data with engineered features"""
+    return pd.DataFrame({
+        'id': range(1, 51),
+        'participant_id': np.repeat(range(1, 11), 5),  # 10 participants, 5 samples each
+        'series_id': range(1, 51),
+        # Sensor fusion features
+        'imu_total_motion': np.random.uniform(0, 10, 50),
+        'thermal_distance_interaction': np.random.uniform(-100, 100, 50),
+        'movement_intensity': np.random.uniform(0, 5, 50),
+        'proximity_mean': np.random.uniform(100, 400, 50),
+        'thermal_contact_indicator': np.random.uniform(0, 1, 50),
+        'close_proximity_ratio': np.random.uniform(0, 0.5, 50),
+        # Statistical features
+        'imu_acc_mean': np.random.normal(0, 1, 50),
+        'imu_gyro_mean': np.random.normal(0, 0.1, 50),
+        'thermal_mean': np.random.normal(25, 2, 50),
+        'tof_mean': np.random.uniform(100, 400, 50),
+        # tsfresh features
+        'tsfresh_acc_x_mean': np.random.normal(0, 1, 50),
+        'tsfresh_acc_x_std': np.random.uniform(0, 2, 50),
+        # Frequency features
+        'acc_x_spectral_centroid': np.random.uniform(0, 25, 50),
+        'acc_x_dominant_freq': np.random.uniform(0, 25, 50),
+        # Target
+        'label': np.random.choice(['no_behavior', 'behavior_1', 'behavior_2'], 50)
+    })
+
+
+class TestGoldCMISensorFunctions:
+    """Gold layer function tests for CMI sensor data"""
+
+    def test_prepare_ml_ready_data_basic(self, sample_processed_cmi_data):
+        """Test basic ML-ready data preparation"""
+        result = prepare_ml_ready_data(sample_processed_cmi_data)
 
         # Use common assertions
-        assert_no_data_loss(sample_gold_data, result)
+        assert_no_data_loss(sample_processed_cmi_data, result)
         assert_data_quality(result)
 
-    def test_prepare_model_data_with_target(self, sample_gold_data):
-        """Test model data preparation with specific target"""
-        result = prepare_model_data(sample_gold_data, target_col="Personality")
+        # CMI-specific checks
+        assert 'participant_id' in result.columns
+        assert 'label_encoded' in result.columns
+
+    def test_prepare_ml_ready_data_with_target(self, sample_processed_cmi_data):
+        """Test ML-ready data preparation with BFRB target"""
+        result = prepare_ml_ready_data(sample_processed_cmi_data, target_col="label")
 
         # Use common assertions
-        assert_no_data_loss(sample_gold_data, result)
+        assert_no_data_loss(sample_processed_cmi_data, result)
         assert_data_quality(result)
 
-    def test_encode_target_basic(self, sample_gold_data):
-        """Test basic target encoding using common test data"""
-        result = encode_target(sample_gold_data)
+        # Target encoding should be present
+        assert 'label_encoded' in result.columns
+
+    def test_encode_bfrb_target_basic(self, sample_processed_cmi_data):
+        """Test BFRB target encoding"""
+        result = encode_bfrb_target(sample_processed_cmi_data)
 
         # Use common assertions
-        assert_no_data_loss(sample_gold_data, result)
+        assert_no_data_loss(sample_processed_cmi_data, result)
         assert_data_quality(result)
         
-        # Should have encoded personality
-        assert "Personality_encoded" in result.columns
-        assert set(result["Personality_encoded"].values) == {0, 1}
+        # Should have encoded labels
+        assert "label_encoded" in result.columns
+        assert "label_binary" in result.columns
+        
+        # Encoded values should be integers
+        assert result["label_encoded"].dtype in ['int32', 'int64']
+        assert result["label_binary"].dtype in ['int32', 'int64']
 
-    def test_encode_target_custom_column(self):
-        """Test target encoding with custom column"""
-        df = pd.DataFrame({"id": [1, 2, 3], "custom_target": ["A", "B", "A"]})
-        result = encode_target(df, target_col="custom_target")
+    def test_encode_bfrb_target_multiclass(self):
+        """Test BFRB target encoding with multi-class labels"""
+        df = pd.DataFrame({
+            'id': [1, 2, 3, 4],
+            'label': ['no_behavior', 'behavior_1', 'behavior_2', 'behavior_1']
+        })
+        result = encode_bfrb_target(df, target_col="label")
 
-        # Use common assertions
-        assert_no_data_loss(df, result)
-        assert "custom_target_encoded" in result.columns
+        # Should create encoded and binary versions
+        assert "label_encoded" in result.columns
+        assert "label_binary" in result.columns
+        
+        # Binary should be 0 for no_behavior, 1 for any behavior
+        assert result.loc[0, 'label_binary'] == 0  # no_behavior
+        assert result.loc[1, 'label_binary'] == 1  # behavior_1
+        assert result.loc[2, 'label_binary'] == 1  # behavior_2
 
     @patch("src.data.gold.duckdb.connect")
     def test_create_gold_tables_success(self, mock_connect, mock_db_connection):
-        """Test gold table creation using common mock"""
+        """Test gold table creation for CMI data"""
         mock_connect.return_value = mock_db_connection.get_mock_conn()
 
         create_gold_tables()
@@ -87,7 +172,7 @@ class TestGoldFunctions:
 
     @patch("src.data.gold.duckdb.connect")
     def test_load_gold_data_success(self, mock_connect, mock_db_connection):
-        """Test gold data loading using common mock"""
+        """Test gold data loading for CMI sensor data"""
         mock_connect.return_value = mock_db_connection.get_mock_conn()
 
         train, test = load_gold_data()
@@ -95,459 +180,376 @@ class TestGoldFunctions:
         # Use common assertions
         assert len(train) == 5  # sample_bronze_data length
         assert len(test) == 5   # sample_gold_data length
-        # 実際のカラム名に合わせて修正
-        assert "Time_spent_Alone" in train.columns
+        assert "id" in train.columns
         assert "id" in test.columns
+
+    def test_get_ml_ready_sequences(self, sample_processed_cmi_data):
+        """Test ML-ready sequence preparation"""
+        X, y, groups = get_ml_ready_sequences(sample_processed_cmi_data)
+        
+        # Basic structure checks
+        assert isinstance(X, pd.DataFrame)
+        assert isinstance(y, pd.Series)
+        assert isinstance(groups, pd.Series)
+        
+        # Length consistency
+        assert len(X) == len(y) == len(groups)
+        assert len(X) == len(sample_processed_cmi_data)
+        
+        # Target encoding
+        assert y.dtype in ['int32', 'int64']
+        
+        # Groups for GroupKFold
+        assert groups.name == 'participant_id' or groups.dtype in ['int32', 'int64']
+
+    def test_setup_groupkfold_cv(self, sample_processed_cmi_data):
+        """Test GroupKFold CV setup for participant-based splitting"""
+        gkf, cv_splits = setup_groupkfold_cv(sample_processed_cmi_data, n_splits=3)
+        
+        # Basic structure
+        assert len(cv_splits) == 3
+        assert all(len(split) == 2 for split in cv_splits)
+        
+        # No participant leakage validation
+        X, y, groups = get_ml_ready_sequences(sample_processed_cmi_data)
+        for train_idx, val_idx in cv_splits:
+            train_participants = set(groups.iloc[train_idx])
+            val_participants = set(groups.iloc[val_idx])
+            assert not (train_participants & val_participants), "Participant leakage detected!"
+
+    def test_create_sequence_windows(self, sample_cmi_data):
+        """Test sequence window creation for CNN/RNN training"""
+        windowed_df = create_sequence_windows(
+            sample_cmi_data, 
+            window_size=10, 
+            overlap=0.5
+        )
+        
+        # Basic structure
+        assert isinstance(windowed_df, pd.DataFrame)
+        assert len(windowed_df) > 0
+        
+        # Should have window metadata
+        assert 'window_start' in windowed_df.columns
+        assert 'window_end' in windowed_df.columns
+        
+        # Should have aggregated features
+        aggregated_features = [col for col in windowed_df.columns if col.endswith('_mean')]
+        assert len(aggregated_features) > 0
 
     def test_empty_dataframe_handling(self):
         """Test functions handle empty DataFrames gracefully"""
         empty_df = pd.DataFrame()
 
         # Should not crash
-        result1 = prepare_model_data(empty_df)
-        result2 = encode_target(empty_df)
+        result1 = prepare_ml_ready_data(empty_df)
+        result2 = encode_bfrb_target(empty_df)
 
         assert isinstance(result1, pd.DataFrame)
         assert isinstance(result2, pd.DataFrame)
 
 
-class TestGoldCleaning:
-    """Test gold.py cleaning functionality using common fixtures"""
+class TestGoldSensorCleaning:
+    """Test gold.py sensor data cleaning functionality"""
 
-    def test_clean_and_validate_features_infinite_values(self, edge_case_data):
-        """Test cleaning of infinite values using common edge case data"""
-        result = clean_and_validate_features(edge_case_data)
+    def test_clean_and_validate_sensor_features_basic(self, sample_cmi_data):
+        """Test basic sensor feature cleaning"""
+        result = clean_and_validate_sensor_features(sample_cmi_data)
         
         # Use common assertions
-        assert_no_data_loss(edge_case_data, result)
+        assert_no_data_loss(sample_cmi_data, result)
         assert_data_quality(result)
         
-        # Infinite values should be handled
+        # Sensor-specific validations
+        # IMU values should be within reasonable range
+        for col in ['acc_x', 'acc_y', 'acc_z']:
+            if col in result.columns:
+                assert result[col].min() >= -100
+                assert result[col].max() <= 100
+        
+        # ToF values should be positive
+        for col in ['tof_0', 'tof_1', 'tof_2', 'tof_3']:
+            if col in result.columns:
+                assert result[col].min() >= 0
+                assert result[col].max() <= 1000
+
+    def test_clean_and_validate_sensor_features_infinite_values(self):
+        """Test cleaning of infinite values in sensor data"""
+        df = pd.DataFrame({
+            'id': [1, 2, 3],
+            'acc_x': [1.0, np.inf, -np.inf],
+            'tof_0': [100, 200, np.inf],
+            'thm_0': [25, -np.inf, 30]
+        })
+        
+        result = clean_and_validate_sensor_features(df)
+        
+        # No infinite values should remain
         for col in result.columns:
             if result[col].dtype in ['float64', 'float32']:
                 assert not np.isinf(result[col]).any()
 
-    def test_clean_and_validate_features_outliers(self, create_outlier_data):
-        """Test outlier handling using common outlier data"""
-        df = create_outlier_data(100)
-        result = clean_and_validate_features(df)
+    def test_clean_and_validate_sensor_features_missing_values(self):
+        """Test sensor-specific missing value handling"""
+        df = pd.DataFrame({
+            'id': [1, 2, 3],
+            'acc_x': [1.0, np.nan, 3.0],
+            'tof_0': [100, np.nan, 300],
+            'thm_0': [25, np.nan, 30]
+        })
         
-        # Use common assertions
-        assert_no_data_loss(df, result)
-        assert_data_quality(result)
+        result = clean_and_validate_sensor_features(df)
         
-        # Outlier should be clipped
-        assert result['outlier_feature'].max() < 1000
-
-    def test_clean_and_validate_features_missing_values(self, missing_data):
-        """Test missing value handling using common missing data"""
-        result = clean_and_validate_features(missing_data)
-        
-        # Use common assertions
-        assert_no_data_loss(missing_data, result)
-        assert_data_quality(result)
-        
-        # Missing values should be filled
-        for col in result.columns:
-            if result[col].dtype in ['float64', 'float32']:
-                assert not result[col].isna().any()
+        # Missing values should be filled appropriately
+        assert not result['acc_x'].isna().any()  # Filled with median
+        assert not result['tof_0'].isna().any()  # Filled with 500 (medium distance)
+        assert not result['thm_0'].isna().any() # Filled with 25 (room temperature)
 
 
-class TestGoldFeatureSelection:
-    """Test gold.py feature selection functionality using common fixtures"""
+class TestGoldSensorFeatureSelection:
+    """Test sensor-aware feature selection functionality"""
 
-    def test_select_best_features_basic(self, create_correlated_test_data):
-        """Test basic feature selection using common correlated test data"""
-        df = create_correlated_test_data(100, correlation=0.8)
+    def test_select_sensor_features_basic(self, sample_processed_cmi_data):
+        """Test basic sensor feature selection"""
+        selected_features = select_sensor_features(
+            sample_processed_cmi_data, 
+            'label', 
+            k=5
+        )
         
-        selected_features = select_best_features(df, 'target', k=1)
-        
-        # Use common assertions
+        # Basic validation
         assert isinstance(selected_features, list)
-        assert len(selected_features) <= 1
+        assert len(selected_features) <= 5
         assert 'id' not in selected_features
-        assert 'target' not in selected_features
+        assert 'label' not in selected_features
+        assert 'participant_id' not in selected_features
 
-    def test_select_best_features_string_target(self, sample_gold_data):
-        """Test feature selection with string target using common test data"""
-        selected_features = select_best_features(sample_gold_data, 'Personality', k=2)
+    def test_select_sensor_features_prioritization(self, sample_processed_cmi_data):
+        """Test sensor feature prioritization"""
+        selected_features = select_sensor_features(
+            sample_processed_cmi_data, 
+            'label', 
+            k=3
+        )
         
-        # Use common assertions
-        assert isinstance(selected_features, list)
-        assert len(selected_features) <= 2
-        assert 'Personality' not in selected_features
-
-    def test_select_best_features_fewer_than_k(self, sample_gold_data):
-        """Test feature selection when fewer features available than k"""
-        # Create data with only 2 features
-        df = sample_gold_data[['id', 'extrovert_score', 'Personality']]
-        
-        selected_features = select_best_features(df, 'Personality', k=5)
-        
-        # Use common assertions
-        assert isinstance(selected_features, list)
-        assert len(selected_features) <= 2  # Should not exceed available features
-
-
-class TestGoldCLAUDEMDFeatures:
-    """Test CLAUDE.md specified Gold layer functions using common fixtures"""
-
-    def test_get_ml_ready_data_lightgbm_interface(self, sample_gold_data):
-        """Test LightGBM interface using common test data"""
-        # Prepare data for ML
-        X, y = get_ml_ready_data(sample_gold_data, target_col='Personality')
-        
-        # Use common assertions
-        assert isinstance(X, pd.DataFrame)
-        assert isinstance(y, pd.Series)
-        assert len(X) == len(y)
-        assert len(X) == len(sample_gold_data)
-        
-        # LightGBM compatibility
-        assert_lightgbm_compatibility(X)
-        
-        # Target should be encoded
-        assert y.dtype in ['int64', 'int32']
-        # カテゴリカルエンコーディングの結果を確認
-        assert len(set(y.values)) <= 2  # 0と1の値のみ
-
-    def test_clean_and_validate_features_final_validation(self, edge_case_data):
-        """Test final validation using common edge case data"""
-        result = clean_and_validate_features(edge_case_data)
-        
-        # Use common assertions
-        assert_no_data_loss(edge_case_data, result)
-        assert_data_quality(result)
-        
-        # Final validation checks
-        for col in result.columns:
-            if result[col].dtype in ['float64', 'float32']:
-                # No infinite values
-                assert not np.isinf(result[col]).any()
-                # No extreme outliers
-                feature_values = result[col].dropna()
-                if len(feature_values) > 0:
-                    assert feature_values.min() >= -1000
-                    assert feature_values.max() <= 10000
-
-    def test_select_best_features_statistical_selection(self, create_correlated_test_data):
-        """Test statistical feature selection using common correlated test data"""
-        df = create_correlated_test_data(100, correlation=0.8)
-        
-        selected_features = select_best_features(df, 'target', k=2, method='statistical')
-        
-        # Use common assertions
-        assert isinstance(selected_features, list)
-        assert len(selected_features) <= 2
-        
-        # Should select most important features
-        if len(selected_features) > 0:
-            assert 'feature1' in selected_features or 'feature2' in selected_features
-
-    def test_create_submission_format_competition_output(self, sample_gold_data):
-        """Test competition submission format using common test data"""
-        # Mock predictions
-        predictions = np.array([0.1, 0.9, 0.3, 0.7, 0.5])
-        
-        submission = create_submission(sample_gold_data, predictions)
-        
-        # Use common assertions
-        assert isinstance(submission, pd.DataFrame)
-        assert len(submission) == len(sample_gold_data)
-        
-        # Competition format requirements
-        assert 'id' in submission.columns
-        assert 'Personality' in submission.columns
-        assert submission['Personality'].dtype in ['object', 'string']
-
-    def test_prepare_model_data_model_specific_formatting(self, sample_gold_data):
-        """Test model-specific formatting using common test data"""
-        # Test different model types
-        result_lightgbm = prepare_model_data(sample_gold_data, model_type='lightgbm')
-        result_xgboost = prepare_model_data(sample_gold_data, model_type='xgboost')
-        
-        # Use common assertions
-        assert_no_data_loss(sample_gold_data, result_lightgbm)
-        assert_no_data_loss(sample_gold_data, result_xgboost)
-        assert_data_quality(result_lightgbm)
-        assert_data_quality(result_xgboost)
-
-
-class TestGoldDependencyChain:
-    """Test Gold layer Silver dependency enforcement using common fixtures"""
-    
-    @patch('duckdb.connect')
-    def test_load_gold_data_silver_dependency(self, mock_connect, mock_db_connection):
-        """Test that load_gold_data only accesses Silver tables"""
-        mock_connect.return_value = mock_db_connection.get_mock_conn()
-        
-        load_gold_data()
-        
-        # Verify only Silver layer access
-        expected_calls = [
-            'SELECT * FROM gold.train',
-            'SELECT * FROM gold.test'
+        # Should prioritize sensor fusion features
+        priority_patterns = [
+            'imu_total_motion', 'thermal_distance_interaction', 'movement_intensity'
         ]
-        actual_calls = [call[0][0] for call in mock_db_connection.get_mock_conn().execute.call_args_list]
-        assert actual_calls == expected_calls
         
-        # Verify no Bronze layer access
-        forbidden_calls = ['bronze.train', 'bronze.test', 'playground_series_s5e7.train']
-        for forbidden in forbidden_calls:
-            assert not any(forbidden in call for call in actual_calls)
-    
-    def test_create_gold_tables_silver_dependency_simplified(self, mock_db_connection):
-        """Test Gold layer Silver dependency enforcement"""
-        with patch('duckdb.connect', return_value=mock_db_connection.get_mock_conn()):
-            with patch('src.data.gold.load_gold_data') as mock_load_gold:
-                mock_load_gold.return_value = (pd.DataFrame(), pd.DataFrame())
-                
-                create_gold_tables()
-                
-                # 実際の実装ではload_gold_dataは呼ばれない可能性があるため、
-                # テーブル作成が成功したことを確認
-                mock_conn = mock_db_connection.get_mock_conn()
-                assert mock_conn.execute.called
-    
-    def test_gold_pipeline_integration(self, sample_silver_data):
-        """Test Gold pipeline integration using common test data"""
-        # Apply Gold transformations
-        result1 = prepare_model_data(sample_silver_data)
-        result2 = clean_and_validate_features(result1)
-        result3 = encode_target(result2)
+        # At least one priority feature should be selected
+        priority_selected = any(
+            any(pattern in feature for pattern in priority_patterns)
+            for feature in selected_features
+        )
+        assert priority_selected or len(selected_features) == 0
+
+    def test_select_sensor_features_statistical_method(self, sample_processed_cmi_data):
+        """Test statistical feature selection method"""
+        selected_features = select_sensor_features(
+            sample_processed_cmi_data, 
+            'label', 
+            k=3, 
+            method='statistical'
+        )
+        
+        assert isinstance(selected_features, list)
+        assert len(selected_features) <= 3
+
+
+class TestGoldGroupKFoldSupport:
+    """Test GroupKFold support for participant-based CV"""
+
+    def test_groupkfold_cv_no_leakage(self, sample_processed_cmi_data):
+        """Test GroupKFold ensures no participant leakage"""
+        gkf, cv_splits = setup_groupkfold_cv(sample_processed_cmi_data, n_splits=3)
+        
+        X, y, groups = get_ml_ready_sequences(sample_processed_cmi_data)
+        
+        # Check each fold for participant leakage
+        for i, (train_idx, val_idx) in enumerate(cv_splits):
+            train_participants = set(groups.iloc[train_idx])
+            val_participants = set(groups.iloc[val_idx])
+            
+            # No overlap between train and validation participants
+            assert not (train_participants & val_participants), f"Fold {i}: Participant leakage detected!"
+            
+            # Both sets should be non-empty
+            assert len(train_participants) > 0, f"Fold {i}: No training participants"
+            assert len(val_participants) > 0, f"Fold {i}: No validation participants"
+
+    def test_groupkfold_cv_missing_participant_id(self):
+        """Test GroupKFold with missing participant_id"""
+        df = pd.DataFrame({
+            'id': [1, 2, 3, 4],
+            'feature1': [1, 2, 3, 4],
+            'label': ['no_behavior', 'behavior_1', 'behavior_2', 'behavior_1']
+        })
+        
+        # Should create dummy groups when participant_id is missing
+        X, y, groups = get_ml_ready_sequences(df)
+        
+        assert isinstance(groups, pd.Series)
+        assert len(groups) == len(df)
+
+    def test_groupkfold_participant_distribution(self, sample_processed_cmi_data):
+        """Test participant distribution across folds"""
+        gkf, cv_splits = setup_groupkfold_cv(sample_processed_cmi_data, n_splits=3)
+        
+        X, y, groups = get_ml_ready_sequences(sample_processed_cmi_data)
+        total_participants = groups.nunique()
+        
+        # Each fold should have reasonable participant distribution
+        for train_idx, val_idx in cv_splits:
+            train_participants = groups.iloc[train_idx].nunique()
+            val_participants = groups.iloc[val_idx].nunique()
+            
+            # Validation should have at least 1 participant
+            assert val_participants >= 1
+            # Training should have majority of participants
+            assert train_participants >= val_participants
+
+
+class TestGoldSubmissionFormat:
+    """Test CMI competition submission format"""
+
+    def test_create_submission_format_basic(self, sample_processed_cmi_data):
+        """Test basic submission format creation"""
+        # Mock predictions
+        predictions = np.array([0, 1, 2, 1, 0] * 10)  # Multi-class predictions
+        
+        filename = create_submission_format(predictions, filename="test_submission.csv")
+        
+        # Should create a file
+        assert filename.endswith('.csv')
+        
+        # Clean up
+        if os.path.exists(filename):
+            os.remove(filename)
+
+    def test_create_submission_dataframe_multiclass(self, sample_processed_cmi_data):
+        """Test submission DataFrame creation for multi-class"""
+        predictions = np.array([0, 1, 2, 1, 0] * 10)  # Multi-class predictions
+        
+        submission = create_submission_dataframe(sample_processed_cmi_data, predictions)
+        
+        # Basic structure
+        assert isinstance(submission, pd.DataFrame)
+        assert len(submission) == len(sample_processed_cmi_data)
+        assert 'id' in submission.columns
+        assert 'label' in submission.columns
+        
+        # Multi-class labels
+        unique_labels = set(submission['label'])
+        expected_labels = {'no_behavior', 'behavior_1', 'behavior_2', 'behavior_3'}
+        assert unique_labels.issubset(expected_labels)
+
+    def test_create_submission_dataframe_binary(self, sample_processed_cmi_data):
+        """Test submission DataFrame creation for binary"""
+        predictions = np.array([0.1, 0.9, 0.3, 0.7, 0.5] * 10)  # Binary predictions
+        
+        submission = create_submission_dataframe(sample_processed_cmi_data, predictions)
+        
+        # Basic structure
+        assert isinstance(submission, pd.DataFrame)
+        assert len(submission) == len(sample_processed_cmi_data)
+        
+        # Binary labels
+        unique_labels = set(submission['label'])
+        expected_labels = {'no_behavior', 'behavior'}
+        assert unique_labels.issubset(expected_labels)
+
+
+class TestGoldLightGBMCompatibility:
+    """Test LightGBM compatibility for CMI sensor data"""
+
+    def test_get_ml_ready_sequences_lightgbm_interface(self, sample_processed_cmi_data):
+        """Test LightGBM interface"""
+        X, y, groups = get_ml_ready_sequences(sample_processed_cmi_data)
         
         # Use common assertions
-        assert_no_data_loss(sample_silver_data, result3)
-        assert_data_quality(result3)
+        assert_lightgbm_compatibility(X)
         
-        # Verify Gold features are created
-        assert 'Personality_encoded' in result3.columns
-        
-        # Verify data integrity
-        assert len(result3) == len(sample_silver_data)
-
-
-class TestGoldLightGBMInterface:
-    """Test LightGBM interface using common fixtures"""
-
-    def test_feature_importance_ranking_interface(self, sample_gold_data):
-        """Test feature importance ranking interface using common test data"""
-        feature_names = get_feature_names(sample_gold_data)
-        
-        # Use common assertions
-        assert isinstance(feature_names, list)
-        assert len(feature_names) > 0
-        
-        # Should exclude target and ID columns
-        assert 'Personality' not in feature_names
-        assert 'id' not in feature_names
-        
-        # Should include feature columns
-        assert 'extrovert_score' in feature_names
-        assert 'introvert_score' in feature_names
-
-    def test_memory_optimization_arrays(self, large_test_data):
-        """Test memory optimization arrays using common large test data"""
-        # Convert to optimized arrays
-        X, y = get_ml_ready_data(large_test_data, target_col='Personality')
-        
-        # Use common assertions
+        # LightGBM-specific checks
         assert isinstance(X, pd.DataFrame)
         assert isinstance(y, pd.Series)
-        
-        # Memory optimization checks
-        # DataFrameの真偽値評価を避けるため、明示的にチェック
-        dtypes_check = X.dtypes.apply(lambda x: x in ['float32', 'float64', 'int32', 'int64'])
-        assert dtypes_check.all(), f"Some columns have incompatible dtypes: {X.dtypes[dtypes_check == False]}"
         assert y.dtype in ['int32', 'int64']
-
-    def test_production_quality_validation(self, edge_case_data):
-        """Test production quality validation using common edge case data"""
-        result = clean_and_validate_features(edge_case_data)
         
-        # Use common assertions
-        assert_data_quality(result)
-        
-        # Production quality checks
-        for col in result.columns:
-            if result[col].dtype in ['float64', 'float32']:
-                # No infinite values
-                assert not np.isinf(result[col]).any()
-                # No extreme outliers
-                feature_values = result[col].dropna()
-                if len(feature_values) > 0:
-                    assert feature_values.min() >= -1000
-                    assert feature_values.max() <= 10000
-
-    def test_silver_dependency_exclusive_access(self, mock_db_connection):
-        """Test Gold layer exclusive Silver dependency access"""
-        with patch('duckdb.connect', return_value=mock_db_connection.get_mock_conn()):
-            with patch('src.data.gold.load_gold_data') as mock_load_gold:
-                mock_load_gold.return_value = (pd.DataFrame(), pd.DataFrame())
-                
-                load_gold_data()
-                
-                # 実際の実装ではload_gold_dataは呼ばれない可能性があるため、
-                # データベースアクセスが成功したことを確認
-                mock_conn = mock_db_connection.get_mock_conn()
-                assert mock_conn.execute.called
-
-    def test_model_ready_lightgbm_consumption(self, sample_gold_data):
-        """Test model-ready LightGBM consumption using common test data"""
-        # Prepare data for LightGBM
-        X, y = get_ml_ready_data(sample_gold_data, target_col='Personality')
-        
-        # Use common LightGBM compatibility assertions
-        assert_lightgbm_compatibility(X)
-        
-        # LightGBM consumption checks
-        # DataFrameの真偽値評価を避けるため、明示的にチェック
-        dtypes_check = X.dtypes.apply(lambda x: x in ['float32', 'float64', 'int32', 'int64'])
-        assert dtypes_check.all(), f"Some columns have incompatible dtypes: {X.dtypes[dtypes_check == False]}"
-        assert y.dtype in ['int32', 'int64']
-        assert set(y.values) == {0, 1}
-        
-        # No missing values in features
-        assert not X.isna().any().any()
-
-    def test_competition_format_kaggle_submission_compatibility(self, sample_gold_data):
-        """Test competition format Kaggle submission compatibility"""
-        # Mock predictions
-        predictions = np.array([0.1, 0.9, 0.3, 0.7, 0.5])
-        
-        submission = create_submission(sample_gold_data, predictions)
-        
-        # Use common assertions
-        assert isinstance(submission, pd.DataFrame)
-        assert len(submission) == len(sample_gold_data)
-        
-        # Kaggle submission format requirements
-        assert 'id' in submission.columns
-        assert 'Personality' in submission.columns
-        assert submission['Personality'].dtype in ['object', 'string']
-        
-        # ID should be preserved
-        pd.testing.assert_series_equal(submission['id'], sample_gold_data['id'])
-
-    def test_model_prediction_interface_lightgbm_format(self, sample_gold_data):
-        """Test model prediction interface LightGBM format"""
-        # Prepare data for prediction
-        X, y = get_ml_ready_data(sample_gold_data, target_col='Personality')
-        
-        # Use common assertions
-        assert_lightgbm_compatibility(X)
-        
-        # Prediction interface checks
-        assert X.shape[0] == len(y)
-        assert X.shape[1] > 0
+        # No missing values
         assert not X.isna().any().any()
         assert not y.isna().any()
 
-    def test_final_validation_infinite_value_processing(self, edge_case_data):
-        """Test final validation infinite value processing"""
-        result = clean_and_validate_features(edge_case_data)
+    def test_extract_model_arrays(self, sample_processed_cmi_data):
+        """Test model array extraction for traditional ML workflows"""
+        X, y, feature_names = extract_model_arrays(sample_processed_cmi_data)
         
-        # Use common assertions
-        assert_data_quality(result)
+        # Basic structure
+        assert isinstance(X, np.ndarray)
+        assert isinstance(y, np.ndarray)
+        assert isinstance(feature_names, list)
         
-        # Infinite value processing checks
-        for col in result.columns:
-            if result[col].dtype in ['float64', 'float32']:
-                assert not np.isinf(result[col]).any()
-                assert not np.isnan(result[col]).any()
+        # Dimensions
+        assert X.shape[0] == len(y)
+        assert X.shape[1] == len(feature_names)
+        
+        # Feature names should exclude metadata
+        metadata_cols = ['id', 'participant_id', 'series_id', 'label']
+        for col in metadata_cols:
+            assert col not in feature_names
 
-    def test_type_consistency_lightgbm_compatible(self, sample_gold_data):
-        """Test type consistency LightGBM compatible"""
-        result = prepare_model_data(sample_gold_data)
+    def test_get_sensor_feature_names(self, sample_processed_cmi_data):
+        """Test sensor feature name extraction"""
+        feature_names = get_sensor_feature_names(sample_processed_cmi_data)
         
-        # Use common LightGBM compatibility assertions
-        assert_lightgbm_compatibility(result)
+        # Basic validation
+        assert isinstance(feature_names, list)
+        assert len(feature_names) > 0
         
-        # Type consistency checks
-        for col in result.columns:
-            assert result[col].dtype in ['float64', 'float32', 'int64', 'int32', 'object']
+        # Should exclude metadata
+        metadata_cols = ['id', 'participant_id', 'series_id', 'timestamp', 'label']
+        for col in metadata_cols:
+            assert col not in feature_names
+        
+        # Should include sensor features
+        sensor_features = [col for col in feature_names if any(pattern in col for pattern in ['imu_', 'thermal_', 'tof_'])]
+        assert len(sensor_features) > 0
 
-    def test_memory_optimization_efficient_arrays(self, large_test_data):
-        """Test memory optimization efficient arrays"""
-        X, y = get_ml_ready_data(large_test_data, target_col='Personality')
+
+class TestGoldDataIntegration:
+    """Test Gold layer data integration and pipeline"""
+
+    def test_full_pipeline_integration(self, sample_cmi_data):
+        """Test full Gold layer pipeline integration"""
+        # Step 1: Clean sensor features
+        cleaned_data = clean_and_validate_sensor_features(sample_cmi_data)
         
-        # Use common assertions
-        assert isinstance(X, pd.DataFrame)
-        assert isinstance(y, pd.Series)
+        # Step 2: Encode targets
+        encoded_data = encode_bfrb_target(cleaned_data)
+        
+        # Step 3: Prepare ML-ready data
+        ml_ready_data = prepare_ml_ready_data(encoded_data)
+        
+        # Step 4: Get sequences for training
+        X, y, groups = get_ml_ready_sequences(ml_ready_data)
+        
+        # Integration checks
+        assert len(X) == len(sample_cmi_data)
+        assert len(y) == len(sample_cmi_data)
+        assert len(groups) == len(sample_cmi_data)
+        
+        # Data quality throughout pipeline
+        assert_data_quality(ml_ready_data)
+        assert_lightgbm_compatibility(X)
+
+    def test_memory_optimization(self, large_test_data):
+        """Test memory optimization for large datasets"""
+        # Convert to sensor data format
+        sensor_data = large_test_data.copy()
+        sensor_data['participant_id'] = sensor_data.index // 100
+        sensor_data['label'] = 'no_behavior'
+        
+        X, y, groups = get_ml_ready_sequences(sensor_data)
         
         # Memory efficiency checks
-        # DataFrameの真偽値評価を避けるため、明示的にチェック
-        dtypes_check = X.dtypes.apply(lambda x: x in ['float32', 'float64', 'int32', 'int64'])
-        assert dtypes_check.all(), f"Some columns have incompatible dtypes: {X.dtypes[dtypes_check == False]}"
-        assert y.dtype in ['int32', 'int64']
-
-    def test_audit_completeness_data_lineage_validation(self, sample_silver_data):
-        """Test audit completeness data lineage validation"""
-        # Apply Gold transformations
-        result1 = prepare_model_data(sample_silver_data)
-        result2 = clean_and_validate_features(result1)
-        result3 = encode_target(result2)
-        
-        # Use common assertions
-        assert_no_data_loss(sample_silver_data, result3)
-        assert_data_quality(result3)
-        
-        # Audit completeness checks
-        assert len(result3) == len(sample_silver_data)
-        assert result3.shape[1] >= sample_silver_data.shape[1]
-
-    def test_feature_selection_bronze_medal_target_optimization(self, create_correlated_test_data):
-        """Test feature selection Bronze Medal target optimization"""
-        df = create_correlated_test_data(100, correlation=0.8)
-        
-        selected_features = select_best_features(df, 'target', k=2)
-        
-        # Use common assertions
-        assert isinstance(selected_features, list)
-        assert len(selected_features) <= 2
-        
-        # Bronze Medal optimization checks
-        if len(selected_features) > 0:
-            # Should select most predictive features
-            assert 'feature1' in selected_features or 'feature2' in selected_features
-
-    def test_statistical_selection_f_test_mutual_information(self, create_correlated_test_data):
-        """Test statistical selection F-test mutual information"""
-        df = create_correlated_test_data(100, correlation=0.8)
-        
-        selected_features = select_best_features(df, 'target', k=2, method='statistical')
-        
-        # Use common assertions
-        assert isinstance(selected_features, list)
-        assert len(selected_features) <= 2
-        
-        # Statistical selection checks
-        if len(selected_features) > 0:
-            # Should select statistically significant features
-            assert 'feature1' in selected_features or 'feature2' in selected_features
-
-    def test_feature_importance_ranking_lightgbm_optimization(self, sample_gold_data):
-        """Test feature importance ranking LightGBM optimization"""
-        feature_names = get_feature_names(sample_gold_data)
-        
-        # Use common assertions
-        assert isinstance(feature_names, list)
-        assert len(feature_names) > 0
-        
-        # LightGBM optimization checks
-        assert 'extrovert_score' in feature_names
-        assert 'introvert_score' in feature_names
-        assert 'Personality' not in feature_names  # Target excluded
-
-    def test_performance_monitoring_feature_importance_tracking(self, sample_gold_data):
-        """Test performance monitoring feature importance tracking"""
-        # Get feature names for importance tracking
-        feature_names = get_feature_names(sample_gold_data)
-        
-        # Use common assertions
-        assert isinstance(feature_names, list)
-        assert len(feature_names) > 0
-        
-        # Performance monitoring checks
-        assert len(feature_names) == sample_gold_data.shape[1] - 2  # Exclude id and target
-        assert all(isinstance(name, str) for name in feature_names) 
+        assert X.memory_usage(deep=True).sum() < sensor_data.memory_usage(deep=True).sum()
+        assert y.dtype in ['int32', 'int64']  # Efficient integer encoding
