@@ -484,17 +484,17 @@ def create_silver_tables() -> None:
     train_silver = advanced_features(train_bronze)
     test_silver = advanced_features(test_bronze)
 
-    # Step 2: Winner Solution Interaction Features (+0.2-0.4% proven impact)
-    train_silver = s5e7_interaction_features(train_silver)
-    test_silver = s5e7_interaction_features(test_silver)
+    # Step 2: CMI Sensor Interaction Features (multimodal fusion)
+    train_silver = cmi_sensor_interaction_features(train_silver)
+    test_silver = cmi_sensor_interaction_features(test_silver)
 
-    # Step 3: Sensor pattern modeling (+0.1-0.2% accuracy)
-    train_silver = s5e7_drain_adjusted_features(train_silver)
-    test_silver = s5e7_drain_adjusted_features(test_silver)
+    # Step 3: CMI Multimodal Fusion Features (BFRB detection)
+    train_silver = cmi_multimodal_fusion_features(train_silver)
+    test_silver = cmi_multimodal_fusion_features(test_silver)
 
-    # Step 4: Online vs Offline behavioral ratios
-    train_silver = s5e7_communication_ratios(train_silver)
-    test_silver = s5e7_communication_ratios(test_silver)
+    # Step 4: CMI Temporal Pattern Features (behavioral patterns)
+    train_silver = cmi_temporal_pattern_features(train_silver)
+    test_silver = cmi_temporal_pattern_features(test_silver)
 
     # Step 5: Enhanced interaction features (追加の交互作用)
     train_silver = enhanced_interaction_features(train_silver)
@@ -558,62 +558,79 @@ def load_silver_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     return train, test
 
 
-def s5e7_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Interaction features for CMI sensor data"""
+def cmi_sensor_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
+    """CMI sensor interaction features for BFRB detection"""
     df = df.copy()
     
-    # Sensor participation rate
+    # ToF-Thermal proximity interaction (hand-to-face detection)
     if "tof_mean" in df.columns and "thermal_mean" in df.columns:
-        df["sensor_participation_rate"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
+        df["thermal_distance_interaction"] = df["tof_mean"] * df["thermal_mean"]
+        df["proximity_thermal_ratio"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
-    # Motion pattern differences
-    if "motion_intensity" in df.columns and "total_motion" in df.columns:
-        df["motion_pattern_diff"] = df["motion_intensity"] - df["total_motion"]
+    # IMU-ToF movement-proximity correlation
+    if "imu_total_motion" in df.columns and "tof_mean" in df.columns:
+        df["movement_proximity_interaction"] = df["imu_total_motion"] * (1 / (df["tof_mean"] + 1e-8))
     
-    # Communication ratio (sensor-based)
-    if "tof_mean" in df.columns and "thermal_mean" in df.columns and "motion_intensity" in df.columns:
-        total_sensor = df["tof_mean"] + df["thermal_mean"]
-        df["sensor_communication_ratio"] = df["motion_intensity"] / (total_sensor + 1e-8)
+    # Thermal contact indicator (elevated temperature + close proximity)
+    if "thermal_mean" in df.columns and "tof_mean" in df.columns:
+        df["thermal_contact_indicator"] = (df["thermal_mean"] > df["thermal_mean"].quantile(0.7)) & (df["tof_mean"] < df["tof_mean"].quantile(0.3))
+        df["thermal_contact_indicator"] = df["thermal_contact_indicator"].astype(float)
     
-    # Sensor efficiency
-    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
-        df["sensor_efficiency"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
+    # Multi-modal sensor fusion score
+    if "imu_total_motion" in df.columns and "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        df["sensor_fusion_score"] = (df["imu_total_motion"] * 0.4) + (df["thermal_mean"] * 0.3) + ((500 - df["tof_mean"]) * 0.3)
     
     return df
 
 
-def s5e7_drain_adjusted_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Sensor pattern adjusted features for CMI sensor data"""
+def cmi_multimodal_fusion_features(df: pd.DataFrame) -> pd.DataFrame:
+    """CMI multimodal sensor fusion features for BFRB detection"""
     df = df.copy()
     
-    # Activity ratio based on motion
-    if "motion_intensity" in df.columns and "total_motion" in df.columns:
-        df["activity_ratio"] = df["motion_intensity"] / (df["total_motion"] + 1e-8)
+    # Close proximity ratio (ToF distance threshold)
+    if "tof_mean" in df.columns:
+        df["close_proximity_ratio"] = (df["tof_mean"] < 150).astype(float)  # < 15cm proximity
     
-    # Pattern adjusted activity (based on thermal patterns)
-    if "thermal_mean" in df.columns and "motion_intensity" in df.columns:
-        df["pattern_adjusted_activity"] = df["motion_intensity"] * (1 - df["thermal_mean"] / 100)
+    # Movement intensity categorization
+    if "imu_total_motion" in df.columns:
+        df["movement_intensity"] = pd.cut(df["imu_total_motion"], bins=3, labels=[0, 1, 2]).astype(float)
     
-    # Sensor spectrum (multi-modal balance)
-    if "tof_mean" in df.columns and "thermal_mean" in df.columns and "motion_intensity" in df.columns:
-        df["sensor_spectrum"] = (df["tof_mean"] + df["thermal_mean"] + df["motion_intensity"]) / 3
+    # Thermal elevation indicator (above baseline)
+    if "thermal_mean" in df.columns:
+        thermal_baseline = df["thermal_mean"].quantile(0.5)
+        df["thermal_elevation"] = (df["thermal_mean"] > thermal_baseline).astype(float)
+    
+    # Behavioral engagement score (combines all modalities)
+    if "imu_total_motion" in df.columns and "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        # Normalize each component
+        motion_norm = df["imu_total_motion"] / (df["imu_total_motion"].max() + 1e-8)
+        proximity_norm = (500 - df["tof_mean"]) / 500  # Invert distance (closer = higher score)
+        thermal_norm = df["thermal_mean"] / (df["thermal_mean"].max() + 1e-8)
+        
+        df["behavioral_engagement_score"] = (motion_norm * 0.4) + (proximity_norm * 0.35) + (thermal_norm * 0.25)
     
     return df
 
 
-def s5e7_communication_ratios(df: pd.DataFrame) -> pd.DataFrame:
-    """Communication ratios for CMI sensor data"""
+def cmi_temporal_pattern_features(df: pd.DataFrame) -> pd.DataFrame:
+    """CMI temporal pattern features for BFRB detection"""
     df = df.copy()
     
-    # Sensor communication ratios
-    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
-        df["sensor_communication_ratio"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
+    # Hand-to-face frequency ratio (proximity changes)
+    if "tof_std" in df.columns and "tof_mean" in df.columns:
+        df["hand_face_frequency"] = df["tof_std"] / (df["tof_mean"] + 1e-8)
     
-    if "motion_intensity" in df.columns and "total_motion" in df.columns:
-        df["motion_communication_ratio"] = df["motion_intensity"] / (df["total_motion"] + 1e-8)
+    # Movement consistency (low variance = repetitive behavior)
+    if "imu_acc_std" in df.columns and "imu_acc_mean" in df.columns:
+        df["movement_consistency"] = 1 / (df["imu_acc_std"] + 1e-8)
     
-    if "tof_mean" in df.columns and "motion_intensity" in df.columns:
-        df["tof_motion_efficiency"] = df["tof_mean"] / (df["motion_intensity"] + 1e-8)
+    # Thermal stability (contact duration indicator)
+    if "thermal_std" in df.columns and "thermal_mean" in df.columns:
+        df["thermal_stability"] = df["thermal_mean"] / (df["thermal_std"] + 1e-8)
+    
+    # Rhythmic behavior indicator (spectral peak consistency)
+    if "acc_x_spectral_centroid" in df.columns and "acc_x_dominant_freq" in df.columns:
+        df["rhythmic_behavior"] = abs(df["acc_x_spectral_centroid"] - df["acc_x_dominant_freq"])
     
     return df
 
@@ -887,9 +904,9 @@ class SilverPreprocessor(BaseEstimator, TransformerMixin):
         
         # Apply Silver pipeline
         X_transformed = advanced_features(X)
-        X_transformed = s5e7_interaction_features(X_transformed)
-        X_transformed = s5e7_drain_adjusted_features(X_transformed)
-        X_transformed = s5e7_communication_ratios(X_transformed)
+        X_transformed = cmi_sensor_interaction_features(X_transformed)
+        X_transformed = cmi_multimodal_fusion_features(X_transformed)
+        X_transformed = cmi_temporal_pattern_features(X_transformed)
         X_transformed = enhanced_interaction_features(X_transformed)
         
         if self.add_polynomial:
@@ -916,9 +933,9 @@ class FoldSafeSilverPreprocessor(BaseEstimator, TransformerMixin):
         """Learn scaling parameters from training data only"""
         # Apply Silver transformations
         X_silver = advanced_features(X)
-        X_silver = s5e7_interaction_features(X_silver)
-        X_silver = s5e7_drain_adjusted_features(X_silver)
-        X_silver = s5e7_communication_ratios(X_silver)
+        X_silver = cmi_sensor_interaction_features(X_silver)
+        X_silver = cmi_multimodal_fusion_features(X_silver)
+        X_silver = cmi_temporal_pattern_features(X_silver)
         X_silver = enhanced_interaction_features(X_silver)
         
         # Fit advanced feature engineers
@@ -954,9 +971,9 @@ class FoldSafeSilverPreprocessor(BaseEstimator, TransformerMixin):
         
         # Apply Silver transformations
         X_transformed = advanced_features(X)
-        X_transformed = s5e7_interaction_features(X_transformed)
-        X_transformed = s5e7_drain_adjusted_features(X_transformed)
-        X_transformed = s5e7_communication_ratios(X_transformed)
+        X_transformed = cmi_sensor_interaction_features(X_transformed)
+        X_transformed = cmi_multimodal_fusion_features(X_transformed)
+        X_transformed = cmi_temporal_pattern_features(X_transformed)
         X_transformed = enhanced_interaction_features(X_transformed)
         
         # Apply advanced feature engineering
@@ -1023,9 +1040,9 @@ class EnhancedSilverPreprocessor(BaseEstimator, TransformerMixin):
         
         # Apply core Silver features first
         X_transformed = advanced_features(X_transformed)
-        X_transformed = s5e7_interaction_features(X_transformed)
-        X_transformed = s5e7_drain_adjusted_features(X_transformed)
-        X_transformed = s5e7_communication_ratios(X_transformed)
+        X_transformed = cmi_sensor_interaction_features(X_transformed)
+        X_transformed = cmi_multimodal_fusion_features(X_transformed)
+        X_transformed = cmi_temporal_pattern_features(X_transformed)
         X_transformed = enhanced_interaction_features(X_transformed)
         X_transformed = polynomial_features(X_transformed, degree=2)
         
