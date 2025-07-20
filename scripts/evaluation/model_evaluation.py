@@ -591,21 +591,27 @@ def main():
         # Check if OOF predictions are available for detailed analysis
         if 'oof_predictions' in model_info:
             oof_df = model_info['oof_predictions']
-            print(f"  ✓ OOF predictions available for detailed analysis")
             
-            # Calculate comprehensive metrics
-            metrics = evaluate_composite_metrics(oof_df['true_label'], oof_df['oof_prediction'])
-            print(f"  Composite F1: {metrics['composite_f1']:.4f}")
-            print(f"  Binary F1: {metrics['binary_f1']:.4f}")
-            print(f"  Macro F1: {metrics['macro_f1']:.4f}")
-            
-            # Analyze confusion matrix
-            cm, cm_norm, class_metrics = analyze_confusion_matrix(
-                oof_df['true_label'], oof_df['oof_prediction'], model_name, plots_dir
-            )
-            
-            # Identify misclassification patterns
-            misclass_analysis = identify_misclassification_patterns(oof_df, plots_dir)
+            # Check if OOF data has the required columns for detailed analysis
+            if 'true_label' in oof_df.columns and 'oof_prediction' in oof_df.columns:
+                print(f"  ✓ OOF predictions available for detailed analysis")
+                
+                # Calculate comprehensive metrics
+                metrics = evaluate_composite_metrics(oof_df['true_label'], oof_df['oof_prediction'])
+                print(f"  Composite F1: {metrics['composite_f1']:.4f}")
+                print(f"  Binary F1: {metrics['binary_f1']:.4f}")
+                print(f"  Macro F1: {metrics['macro_f1']:.4f}")
+                
+                # Analyze confusion matrix
+                cm, cm_norm, class_metrics = analyze_confusion_matrix(
+                    oof_df['true_label'], oof_df['oof_prediction'], model_name, plots_dir
+                )
+                
+                # Identify misclassification patterns
+                misclass_analysis = identify_misclassification_patterns(oof_df, plots_dir)
+            else:
+                print(f"  ⚠️ OOF predictions available but missing required columns - CV results only")
+                print(f"    Available columns: {list(oof_df.columns)}")
         else:
             print(f"  ⚠️ OOF predictions not available - CV results only")
     
