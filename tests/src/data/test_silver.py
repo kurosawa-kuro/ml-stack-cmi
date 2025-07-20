@@ -133,8 +133,8 @@ class TestSilverAdvancedFeatures:
         assert_feature_engineering_quality(result, min_new_features=5)
         
         # Check basic features
-        assert 'social_ratio' in result.columns
-        assert 'activity_sum' in result.columns
+        assert 'motion_intensity' in result.columns
+        assert 'total_motion' in result.columns
 
     def test_advanced_features_statistical_features(self, sample_bronze_data):
         """Test statistical features creation"""
@@ -463,6 +463,14 @@ class TestSilverCLAUDEMDFeatures:
         ratio_features = [col for col in result.columns if 'ratio' in col.lower()]
         assert len(ratio_features) > 0
 
+    def test_sensor_pattern_adjusted_features(self, sample_bronze_data):
+        """Test sensor pattern adjusted features"""
+        result = s5e7_drain_adjusted_features(sample_bronze_data)
+        
+        # Check that pattern adjusted features are created
+        pattern_features = [col for col in result.columns if 'pattern' in col.lower()]
+        assert len(pattern_features) > 0
+
 
 class TestSilverDependencyChain:
     """Test Silver layer Bronze dependency enforcement using common fixtures"""
@@ -500,9 +508,9 @@ class TestSilverDependencyChain:
         
         # Verify CLAUDE.md features are created
         claude_features = [
-            'Social_event_participation_rate', 'Non_social_outings', 'Communication_ratio',
-            'Friend_social_efficiency', 'Activity_ratio', 'Drain_adjusted_activity',
-            'Online_offline_ratio'
+            'sensor_participation_rate', 'motion_pattern_diff', 'sensor_communication_ratio',
+            'sensor_efficiency', 'activity_ratio', 'pattern_adjusted_activity',
+            'sensor_communication_ratio'
         ]
         for feature in claude_features:
             if feature in result3.columns:
@@ -628,8 +636,8 @@ class TestSilverPerformanceEnhanced:
         
         # Test Winner Solution Interaction Features (+0.2-0.4% proven impact)
         winner_features = [
-            'Social_event_participation_rate', 'Non_social_outings', 
-            'Communication_ratio', 'Friend_social_efficiency'
+            'sensor_participation_rate', 'motion_pattern_diff', 
+            'sensor_communication_ratio', 'sensor_efficiency'
         ]
         for feature in winner_features:
             if feature in result1.columns:

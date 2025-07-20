@@ -488,7 +488,7 @@ def create_silver_tables() -> None:
     train_silver = s5e7_interaction_features(train_silver)
     test_silver = s5e7_interaction_features(test_silver)
 
-    # Step 3: Fatigue-Adjusted Domain Modeling (+0.1-0.2% introversion accuracy)
+    # Step 3: Sensor pattern modeling (+0.1-0.2% accuracy)
     train_silver = s5e7_drain_adjusted_features(train_silver)
     test_silver = s5e7_drain_adjusted_features(test_silver)
 
@@ -562,20 +562,20 @@ def s5e7_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
     """Interaction features for CMI sensor data"""
     df = df.copy()
     
-    # Social event participation rate (sensor-based)
+    # Sensor participation rate
     if "tof_mean" in df.columns and "thermal_mean" in df.columns:
         df["sensor_participation_rate"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
-    # Non-social outings (motion-based)
+    # Motion pattern differences
     if "motion_intensity" in df.columns and "total_motion" in df.columns:
-        df["non_social_motion"] = df["motion_intensity"] - df["total_motion"]
+        df["motion_pattern_diff"] = df["motion_intensity"] - df["total_motion"]
     
     # Communication ratio (sensor-based)
     if "tof_mean" in df.columns and "thermal_mean" in df.columns and "motion_intensity" in df.columns:
         total_sensor = df["tof_mean"] + df["thermal_mean"]
         df["sensor_communication_ratio"] = df["motion_intensity"] / (total_sensor + 1e-8)
     
-    # Friend social efficiency (sensor-based)
+    # Sensor efficiency
     if "tof_mean" in df.columns and "thermal_mean" in df.columns:
         df["sensor_efficiency"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
@@ -583,16 +583,16 @@ def s5e7_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def s5e7_drain_adjusted_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Drain adjusted features for CMI sensor data"""
+    """Sensor pattern adjusted features for CMI sensor data"""
     df = df.copy()
     
     # Activity ratio based on motion
     if "motion_intensity" in df.columns and "total_motion" in df.columns:
         df["activity_ratio"] = df["motion_intensity"] / (df["total_motion"] + 1e-8)
     
-    # Drain adjusted activity (based on thermal patterns)
+    # Pattern adjusted activity (based on thermal patterns)
     if "thermal_mean" in df.columns and "motion_intensity" in df.columns:
-        df["drain_adjusted_activity"] = df["motion_intensity"] * (1 - df["thermal_mean"] / 100)
+        df["pattern_adjusted_activity"] = df["motion_intensity"] * (1 - df["thermal_mean"] / 100)
     
     # Sensor spectrum (multi-modal balance)
     if "tof_mean" in df.columns and "thermal_mean" in df.columns and "motion_intensity" in df.columns:

@@ -260,9 +260,9 @@ class TestEnhancedBronzePreprocessing:
         # Check that all three advanced preprocessing techniques are applied
         # 1. Advanced missing pattern analysis
         advanced_missing_flags = [
-            'social_anxiety_complete_missing',
-            'social_anxiety_partial_missing',
-            'extreme_introvert_missing'
+            'sensor_missing',
+            'motion_missing',
+            'thermal_missing'
         ]
         missing_flags_present = any(flag in result.columns for flag in advanced_missing_flags)
         assert missing_flags_present, "Advanced missing pattern flags should be present"
@@ -284,7 +284,7 @@ class TestEnhancedBronzePreprocessing:
         
         # Check that advanced features are created
         advanced_features = [
-            'social_anxiety_complete_missing',
+            'sensor_missing',
             'isolation_forest_outlier',
             'multiple_outlier_detected'
         ]
@@ -314,15 +314,8 @@ class TestEnhancedBronzePreprocessing:
 
     def test_enhanced_bronze_preprocessing_performance(self, sample_bronze_data):
         """Test performance of enhanced bronze preprocessing"""
-        # Use sample_bronze_data instead of large_test_data to avoid categorical issues
-        test_data = sample_bronze_data.copy()
-        
-        # Convert categorical columns to numeric for correlation calculation
-        test_data['Stage_fear'] = (test_data['Stage_fear'] == 'Yes').astype(float)
-        test_data['Drained_after_socializing'] = (test_data['Drained_after_socializing'] == 'Yes').astype(float)
-        
-        result = assert_sub_second_performance(enhanced_bronze_preprocessing, test_data)
-        assert len(result) == len(test_data)
+        result = assert_sub_second_performance(enhanced_bronze_preprocessing, sample_bronze_data)
+        assert len(result) == len(sample_bronze_data)
 
     def test_enhanced_bronze_preprocessing_lightgbm_compatibility(self, sample_bronze_data):
         """Test LightGBM compatibility of enhanced bronze preprocessing"""
@@ -349,23 +342,23 @@ class TestBronzeTypeSafety:
         assert_lightgbm_compatibility(result)
         
         # Specific dtype assertions
-        assert result["Time_spent_Alone"].dtype in ["float64", "float32"]
-        assert result["Stage_fear_encoded"].dtype in ["float64", "int64"]
+        assert result["acc_x"].dtype in ["float64", "float32"]
+        assert result["tof_0"].dtype in ["float64", "float32"]
 
     def test_schema_validation(self, sample_bronze_data, edge_case_data):
         """Test schema validation using common test data"""
         # Valid schema test
         valid_result = validate_data_quality(sample_bronze_data)
-        assert valid_result["type_validation"]["Time_spent_Alone"] == True
+        assert valid_result["type_validation"]["acc_x"] == True
         
         # Invalid schema test (wrong data types)
         invalid_df = pd.DataFrame({
-            "Time_spent_Alone": ["invalid", "data", "types"],
-            "Social_event_attendance": ["should", "be", "numeric"]
+            "acc_x": ["invalid", "data", "types"],
+            "tof_0": ["should", "be", "numeric"]
         })
         
         invalid_result = validate_data_quality(invalid_df)
-        assert valid_result["type_validation"]["Time_spent_Alone"] == True
+        assert valid_result["type_validation"]["acc_x"] == True
 
 
 class TestBronzeLeakPrevention:
@@ -430,7 +423,7 @@ class TestBronzeCrossFeaturePatterns:
         assert_no_data_loss(df, result)
         
         # Assert missing flags are created for high-impact features
-        high_impact_features = ['Stage_fear', 'Going_outside', 'Time_spent_Alone']
+        high_impact_features = ['acc_x', 'tof_0', 'thm_0']
         for feature in high_impact_features:
             if feature in df.columns:
                 missing_col = f"{feature}_missing"
@@ -482,9 +475,9 @@ class TestBronzePerformance:
         """Test LightGBM-specific optimization features using common test data"""
         # Test categorical encoding preserves NaN for LightGBM
         result_encode = encode_categorical_robust(missing_data)
-        # Check if Stage_fear_encoded exists (original Stage_fear was already encoded)
-        if "Stage_fear_encoded" in result_encode.columns:
-            assert result_encode["Stage_fear_encoded"].dtype == "float64"  # LightGBM compatible
+        # Check if behavior_encoded exists (original behavior was already encoded)
+        if "behavior_encoded" in result_encode.columns:
+            assert result_encode["behavior_encoded"].dtype == "float64"  # LightGBM compatible
         
         # Test missing flags are binary for LightGBM
         result_missing = advanced_missing_strategy(missing_data)
@@ -504,8 +497,8 @@ class TestBronzePerformance:
         
         # Test categorical standardization handles case variations
         result_encode = encode_categorical_robust(edge_case_data)
-        assert result_encode["Stage_fear"].iloc[0] == result_encode["Stage_fear"].iloc[2]  # "Yes" == "yes"
-        assert result_encode["Stage_fear"].iloc[1] == result_encode["Stage_fear"].iloc[3]  # "NO" == "no" 
+        assert result_encode["behavior"].iloc[0] == result_encode["behavior"].iloc[2]  # "behavior_1" == "behavior_1"
+        assert result_encode["behavior"].iloc[1] == result_encode["behavior"].iloc[3]  # "behavior_2" == "behavior_2"
 
 
 class TestBronzeDataQualityOnly:
