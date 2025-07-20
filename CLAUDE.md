@@ -107,15 +107,27 @@ make help                # Show available commands
 
 ### Direct Script Execution
 ```bash
-# Training scripts (in scripts/ directory)
-python scripts/train_fast_dev.py      # Fast development training
-python scripts/train_full_optimized.py # Full optimized training
-python scripts/train_max_performance.py # Max performance training
-python scripts/validate_quick_cv.py    # Quick CV validation
+# Setup and initialization
+python scripts/setup/project_setup.py         # Project initialization
+python scripts/setup/exploratory_analysis.py  # Comprehensive EDA  
+python scripts/setup/data_quality_check.py    # Data quality validation
 
-# Prediction scripts
-python scripts/predict_basic_submission.py # Basic submission
-python scripts/predict_gold_submission.py  # Gold submission
+# Data processing pipeline (Medallion Architecture)
+python scripts/data_processing/bronze_layer.py  # Bronze layer processing
+python scripts/data_processing/silver_layer.py  # Silver layer features
+python scripts/data_processing/gold_layer.py    # Gold layer ML-ready
+
+# Model training
+python scripts/training/train_lightgbm.py     # LightGBM baseline
+python scripts/training/train_cnn.py          # 1D CNN deep learning
+
+# Evaluation and analysis
+python scripts/evaluation/model_evaluation.py  # Model evaluation
+python scripts/evaluation/feature_analysis.py # Feature analysis
+
+# Ensemble and submission
+python scripts/ensemble/train_ensemble.py      # Ensemble training
+python scripts/ensemble/generate_submission.py # Generate submission
 ```
 
 ## 【PROJECT STRUCTURE】
@@ -132,9 +144,87 @@ src/
     ├── time_tracker.py     # Performance tracking
     └── notifications.py    # Status notifications
 
-scripts/                    # Executable training/prediction scripts
+scripts/                    # Organized executable scripts (see SCRIPT MANAGEMENT)
+├── setup/                  # Project initialization & data understanding
+├── data_processing/        # Medallion architecture pipeline
+├── training/              # Model training scripts
+├── evaluation/            # Model evaluation & analysis
+└── ensemble/              # Ensemble & submission generation
+
 tests/                      # Comprehensive test suite (73% coverage)
 ```
+
+## 【SCRIPT MANAGEMENT GUIDELINES】
+
+### Core Script Set (14 Scripts) - DO NOT ADD UNNECESSARILY
+The current script set is **complete and sufficient** for Bronze Medal achievement (LB 0.60+).
+
+#### Established Scripts by Category:
+```
+setup/
+├── project_setup.py         # Environment initialization
+├── exploratory_analysis.py  # Comprehensive EDA
+└── data_quality_check.py    # Data validation
+
+data_processing/
+├── bronze_layer.py         # Data cleaning & normalization
+├── silver_layer.py         # Feature engineering
+└── gold_layer.py           # ML-ready preparation
+
+training/
+├── train_lightgbm.py       # LightGBM baseline
+├── train_cnn.py            # 1D CNN deep learning
+└── train_baseline.py       # Generic training
+
+evaluation/
+├── model_evaluation.py     # Comprehensive evaluation
+├── feature_analysis.py     # Feature importance
+└── validate_quick_cv.py    # Quick validation
+
+ensemble/
+├── train_ensemble.py       # Ensemble training
+└── generate_submission.py  # Submission generation
+```
+
+### Script Addition Rules
+1. **AVOID creating new scripts** - The current set covers the complete ML pipeline
+2. **If absolutely necessary**, follow these strict guidelines:
+   - **Derive from existing names**: e.g., `train_lightgbm_v2.py`, `feature_analysis_advanced.py`
+   - **Place in correct folder**: Maintain the 5-folder structure
+   - **Document justification**: Explain why existing scripts are insufficient
+   - **Update this section**: Add the new script to the appropriate category above
+
+### Naming Conventions for Derivatives
+```
+Original Script          →  Allowed Derivatives
+train_lightgbm.py       →  train_lightgbm_v2.py, train_lightgbm_optimized.py
+feature_analysis.py     →  feature_analysis_sensor.py, feature_analysis_temporal.py
+model_evaluation.py     →  model_evaluation_detailed.py, model_evaluation_compare.py
+```
+
+### Why This Restriction?
+- **Complexity Management**: More scripts = harder maintenance
+- **Bronze Medal Focus**: Current scripts achieve LB 0.60+ target
+- **Quality > Quantity**: Better to optimize existing scripts than add new ones
+- **Team Efficiency**: Clear, limited script set improves collaboration
+
+### Examples of What NOT to Do
+❌ **BAD**: Creating `train_xgboost.py`, `train_catboost.py`, `train_random_forest.py`
+✅ **GOOD**: Add XGBoost/CatBoost to existing `train_ensemble.py`
+
+❌ **BAD**: Creating `eda_sensors.py`, `eda_labels.py`, `eda_participants.py`
+✅ **GOOD**: Enhance existing `exploratory_analysis.py` with additional functions
+
+❌ **BAD**: Creating `submit_to_kaggle.py`, `format_submission.py`
+✅ **GOOD**: Use existing `generate_submission.py` with parameters
+
+### When Script Addition IS Justified
+Only consider new scripts for:
+1. **Fundamentally different approaches**: e.g., `train_transformer.py` for attention-based models
+2. **Competition-specific requirements**: e.g., `handle_test_time_adaptation.py` if required
+3. **Major version rewrites**: e.g., `train_lightgbm_v2.py` with completely new approach
+
+Always ask: "Can this be a function/parameter in an existing script?" before creating new files.
 
 ## 【DATA MANAGEMENT】
 
@@ -400,6 +490,50 @@ make format              # black code formatting
 - Remove unnecessary code and optimize runtime
 - Verify reproducibility across runs
 - Document final implementation approach
+
+### Week 4-5: Advanced Optimization & Robustness
+**Feature Selection & Optimization:**
+- Channel importance analysis for inference speed
+- Binary vs Multi-class metric weighting optimization
+- Threshold tuning for optimal F1 composite score
+
+**Private LB Preparation:**
+- CV-LB alignment validation
+- Robust validation strategies
+- Final ensemble weight calibration
+
+## 【EXPECTED SCORE PROGRESSION】
+
+| Week | Method | Expected CV Score | Expected LB Score |
+|------|--------|------------------|------------------|
+| 1 | tsfresh + LightGBM | 0.48-0.52 | 0.47-0.51 |
+| 2 | + 1D CNN | 0.55-0.58 | 0.54-0.57 |
+| 2 | + Data Augmentation | 0.57-0.60 | 0.56-0.59 |
+| 3 | + Multimodal Fusion | 0.60-0.63 | 0.59-0.62 |
+| 3 | + Ensemble | 0.62-0.65 | 0.61-0.64 |
+
+## 【CRITICAL IMPLEMENTATION WARNINGS】
+
+### Data Leakage Prevention (MANDATORY)
+- **GroupKFold Only**: Must use participant_id for group splitting
+- **Temporal Continuity**: Consider time-series continuity in splits
+- **Test Participant Isolation**: Never use test participant IDs in training
+
+### Computational Resource Management
+- **Memory Monitoring**: tsfresh execution requires significant memory
+- **GPU Batch Sizing**: Adjust batch size according to available GPU memory
+- **Parallel Processing**: Utilize multi-core processing where possible
+
+### Evaluation Metric Understanding
+- **Dual Monitoring**: Track Binary F1 and Macro F1 separately
+- **Bottleneck Identification**: Identify which metric limits overall performance
+- **Class Imbalance**: Address through appropriate sampling or loss weighting
+
+### Success Implementation Keys
+1. **Incremental Progress**: Achieve each week's target consistently
+2. **Error Analysis**: Deep-dive into misclassification patterns
+3. **Domain Knowledge**: Understand BFRB behavioral characteristics
+4. **Experiment Tracking**: Document and compare all experimental results
 
 ## 【SUCCESS CRITERIA】
 - **Bronze Medal**: Achieve LB 0.60+ (top 60% of ~360 teams)
