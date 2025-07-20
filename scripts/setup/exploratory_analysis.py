@@ -219,41 +219,48 @@ def analyze_sensor_distributions(train_df, output_dir):
         sensor_stats = sample_df[columns].describe()
         print(sensor_stats)
         
-        # Distribution plots
-        n_cols = len(columns)
-        n_rows = (n_cols + 2) // 3  # 3 columns per row
-        
-        fig, axes = plt.subplots(n_rows, 3, figsize=(15, 5*n_rows))
-        if n_rows == 1:
-            axes = axes.reshape(1, -1)
-        
-        for i, col in enumerate(columns):
-            row = i // 3
-            col_idx = i % 3
+        # Try to create distribution plots, but skip if matplotlib fails
+        try:
+            # Distribution plots
+            n_cols = len(columns)
+            n_rows = (n_cols + 2) // 3  # 3 columns per row
             
-            if n_rows > 1:
-                ax = axes[row, col_idx]
-            else:
-                ax = axes[col_idx]
+            fig, axes = plt.subplots(n_rows, 3, figsize=(15, 5*n_rows))
+            if n_rows == 1:
+                axes = axes.reshape(1, -1)
+            
+            for i, col in enumerate(columns):
+                row = i // 3
+                col_idx = i % 3
                 
-            sample_df[col].hist(bins=50, ax=ax, alpha=0.7)
-            ax.set_title(f'{col} Distribution')
-            ax.set_xlabel('Value')
-            ax.set_ylabel('Frequency')
-        
-        # Hide empty subplots
-        total_plots = n_rows * 3
-        for i in range(len(columns), total_plots):
-            row = i // 3
-            col_idx = i % 3
-            if n_rows > 1:
-                axes[row, col_idx].set_visible(False)
-            else:
-                axes[col_idx].set_visible(False)
-        
-        plt.tight_layout()
-        plt.savefig(output_dir / f"{group_name.lower()}_distributions.png", dpi=300, bbox_inches='tight')
-        plt.close()
+                if n_rows > 1:
+                    ax = axes[row, col_idx]
+                else:
+                    ax = axes[col_idx]
+                    
+                sample_df[col].hist(bins=50, ax=ax, alpha=0.7)
+                ax.set_title(f'{col} Distribution')
+                ax.set_xlabel('Value')
+                ax.set_ylabel('Frequency')
+            
+            # Hide empty subplots
+            total_plots = n_rows * 3
+            for i in range(len(columns), total_plots):
+                row = i // 3
+                col_idx = i % 3
+                if n_rows > 1:
+                    axes[row, col_idx].set_visible(False)
+                else:
+                    axes[col_idx].set_visible(False)
+            
+            plt.tight_layout()
+            plt.savefig(output_dir / f"{group_name.lower()}_distributions.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"  ✓ Created {group_name.lower()}_distributions.png")
+            
+        except Exception as e:
+            print(f"  ⚠️  Skipping plots for {group_name} due to matplotlib error: {e}")
+            print("  ℹ️  Statistics saved to CSV file")
         
         # Save statistics
         sensor_stats.to_csv(output_dir / f"{group_name.lower()}_statistics.csv")
@@ -279,39 +286,45 @@ def analyze_participant_patterns(train_df, output_dir):
     print(f"Sessions per participant:")
     print(participant_stats['n_sessions'].describe())
     
-    # Visualize participant data distribution
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
-    # Sessions per participant
-    participant_stats['n_sessions'].hist(bins=20, ax=axes[0,0])
-    axes[0,0].set_title('Sessions per Participant')
-    axes[0,0].set_xlabel('Number of Sessions')
-    axes[0,0].set_ylabel('Number of Participants')
-    
-    # Samples per participant
-    participant_stats['n_samples'].hist(bins=20, ax=axes[0,1])
-    axes[0,1].set_title('Samples per Participant')
-    axes[0,1].set_xlabel('Number of Samples')
-    axes[0,1].set_ylabel('Number of Participants')
-    
-    # Data volume by participant (top 20)
-    top_participants = participant_stats.nlargest(20, 'n_samples')
-    top_participants['n_samples'].plot(kind='bar', ax=axes[1,0])
-    axes[1,0].set_title('Top 20 Participants by Sample Count')
-    axes[1,0].set_xlabel('Participant ID')
-    axes[1,0].set_ylabel('Sample Count')
-    axes[1,0].tick_params(axis='x', rotation=45)
-    
-    # Session distribution by participant (top 20)
-    top_participants['n_sessions'].plot(kind='bar', ax=axes[1,1])
-    axes[1,1].set_title('Top 20 Participants by Session Count')
-    axes[1,1].set_xlabel('Participant ID')
-    axes[1,1].set_ylabel('Session Count')
-    axes[1,1].tick_params(axis='x', rotation=45)
-    
-    plt.tight_layout()
-    plt.savefig(output_dir / "participant_analysis.png", dpi=300, bbox_inches='tight')
-    plt.close()
+    # Try to visualize participant data distribution, but skip if matplotlib fails
+    try:
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        
+        # Sessions per participant
+        participant_stats['n_sessions'].hist(bins=20, ax=axes[0,0])
+        axes[0,0].set_title('Sessions per Participant')
+        axes[0,0].set_xlabel('Number of Sessions')
+        axes[0,0].set_ylabel('Number of Participants')
+        
+        # Samples per participant
+        participant_stats['n_samples'].hist(bins=20, ax=axes[0,1])
+        axes[0,1].set_title('Samples per Participant')
+        axes[0,1].set_xlabel('Number of Samples')
+        axes[0,1].set_ylabel('Number of Participants')
+        
+        # Data volume by participant (top 20)
+        top_participants = participant_stats.nlargest(20, 'n_samples')
+        top_participants['n_samples'].plot(kind='bar', ax=axes[1,0])
+        axes[1,0].set_title('Top 20 Participants by Sample Count')
+        axes[1,0].set_xlabel('Participant ID')
+        axes[1,0].set_ylabel('Sample Count')
+        axes[1,0].tick_params(axis='x', rotation=45)
+        
+        # Session distribution by participant (top 20)
+        top_participants['n_sessions'].plot(kind='bar', ax=axes[1,1])
+        axes[1,1].set_title('Top 20 Participants by Session Count')
+        axes[1,1].set_xlabel('Participant ID')
+        axes[1,1].set_ylabel('Session Count')
+        axes[1,1].tick_params(axis='x', rotation=45)
+        
+        plt.tight_layout()
+        plt.savefig(output_dir / "participant_analysis.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print("  ✓ Created participant_analysis.png")
+        
+    except Exception as e:
+        print(f"  ⚠️  Skipping participant plots due to matplotlib error: {e}")
+        print("  ℹ️  Statistics saved to CSV file")
     
     # Save participant statistics
     participant_stats.to_csv(output_dir / "participant_statistics.csv")

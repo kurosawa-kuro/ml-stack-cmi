@@ -57,32 +57,47 @@ def load_model_predictions():
     
     # Check for LightGBM results
     lgb_dir = models_dir / "lgb_baseline"
-    if (lgb_dir / "oof_predictions.csv").exists():
-        oof_df = pd.read_csv(lgb_dir / "oof_predictions.csv")
-        cv_results = json.load(open(lgb_dir / "cv_results.json"))
-        
-        predictions_data['lgb_baseline'] = {
-            'oof_predictions': oof_df,
-            'cv_results': cv_results,
-            'model_type': 'LightGBM'
-        }
-        available_models.append('lgb_baseline')
-        print(f"  ✓ Found LightGBM baseline results")
+    if (lgb_dir / "cv_results.json").exists():
+        try:
+            cv_results = json.load(open(lgb_dir / "cv_results.json"))
+            oof_df = pd.read_csv(lgb_dir / "oof_predictions.csv") if (lgb_dir / "oof_predictions.csv").exists() else None
+            
+            predictions_data['lgb_baseline'] = {
+                'cv_results': cv_results,
+                'model_type': 'LightGBM'
+            }
+            if oof_df is not None:
+                predictions_data['lgb_baseline']['oof_predictions'] = oof_df
+                
+            available_models.append('lgb_baseline')
+            print(f"  ✓ Found LightGBM baseline results")
+            print(f"    CV Score: {cv_results.get('cv_score', 'N/A'):.4f}")
+            print(f"    Phase: {cv_results.get('phase', 'N/A')}")
+        except Exception as e:
+            print(f"  ⚠️ Error loading LightGBM results: {e}")
     
     # Check for CNN results (if available)
     cnn_dir = models_dir / "cnn_1d"
-    if (cnn_dir / "oof_predictions.csv").exists():
-        oof_df = pd.read_csv(cnn_dir / "oof_predictions.csv")
-        
-        predictions_data['cnn_1d'] = {
-            'oof_predictions': oof_df,
-            'model_type': '1D CNN'
-        }
-        available_models.append('cnn_1d')
-        print(f"  ✓ Found 1D CNN results")
+    if (cnn_dir / "cv_results.json").exists():
+        try:
+            cv_results = json.load(open(cnn_dir / "cv_results.json"))
+            oof_df = pd.read_csv(cnn_dir / "oof_predictions.csv") if (cnn_dir / "oof_predictions.csv").exists() else None
+            
+            predictions_data['cnn_1d'] = {
+                'cv_results': cv_results,
+                'model_type': '1D CNN'
+            }
+            if oof_df is not None:
+                predictions_data['cnn_1d']['oof_predictions'] = oof_df
+                
+            available_models.append('cnn_1d')
+            print(f"  ✓ Found 1D CNN results")
+        except Exception as e:
+            print(f"  ⚠️ Error loading CNN results: {e}")
     
     if not available_models:
         print("  ⚠️  No model predictions found. Please train a model first.")
+        print("  💡 Run: make train-lgb-config")
         return None, None
     
     print(f"  Found {len(available_models)} model(s): {available_models}")
@@ -388,6 +403,91 @@ def compare_models(predictions_data, available_models, plots_dir):
     
     return comparison_df
 
+def generate_simplified_report(predictions_data, available_models, output_dir):
+    """Generate simplified evaluation report for CV results only"""
+    print("\n📋 Generating evaluation report...")
+    
+    report_content = f"""
+# Model Evaluation Report
+
+Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## Models Evaluated
+"""
+    
+    for model_name in available_models:
+        model_info = predictions_data[model_name]
+        cv_results = model_info['cv_results']
+        
+        report_content += f"""
+### {model_name} ({model_info['model_type']})
+- **CV Score**: {cv_results.get('cv_score', 'N/A'):.4f}
+- **CV Std**: {cv_results.get('cv_std', 'N/A'):.4f}
+- **Phase**: {cv_results.get('phase', 'N/A')}
+- **Algorithm**: {cv_results.get('algorithm', 'N/A')}
+- **Target Score**: {cv_results.get('target_score', 'N/A')}
+"""
+    
+    # Find best model
+    best_model = available_models[0]
+    best_score = 0
+    for model_name in available_models:
+        cv_score = predictions_data[model_name]['cv_results'].get('cv_score', 0)
+        if cv_score > best_score:
+            best_score = cv_score
+            best_model = model_name
+    
+    report_content += f"""
+
+## Key Findings
+
+### Performance Summary
+- Best performing model: {best_model}
+- Best CV Score: {best_score:.4f}
+- Competition target (Bronze): 0.60+ Composite F1
+- Current status: {'On track' if best_score >= 0.55 else 'Needs improvement'}
+
+### Phase Analysis
+"""
+    
+    for model_name in available_models:
+        cv_results = predictions_data[model_name]['cv_results']
+        phase = cv_results.get('phase', 'N/A')
+        target = cv_results.get('target_score', 'N/A')
+        score = cv_results.get('cv_score', 0)
+        
+        if phase == 'baseline':
+            report_content += f"- **{model_name} (Baseline)**: CV {score:.4f} / Target {target}\n"
+            if score >= target:
+                report_content += f"  ✅ Baseline target achieved - Ready for optimization phase\n"
+            else:
+                report_content += f"  ⚠️ Baseline target not reached - Focus on feature engineering\n"
+    
+    report_content += f"""
+
+## Recommendations
+
+### Immediate Actions
+1. **Feature Engineering**: Improve baseline features for better CV score
+2. **Hyperparameter Tuning**: Optimize LightGBM parameters
+3. **Data Quality**: Address any data quality issues identified
+
+### Next Steps
+1. **Deep Learning**: Implement 1D CNN for multimodal sensor fusion
+2. **Ensemble Methods**: Combine multiple model approaches
+3. **Advanced Features**: Implement domain-specific BFRB features
+
+## Competition Context
+- **Target**: Bronze medal (LB 0.60+)
+- **Current Status**: {'On track' if best_score >= 0.55 else 'Needs improvement'}
+- **Phase**: Week 1 - Baseline establishment
+"""
+
+    with open(output_dir / "EVALUATION_REPORT.md", "w") as f:
+        f.write(report_content)
+    
+    print(f"  ✓ Evaluation report saved to: {output_dir}/EVALUATION_REPORT.md")
+
 def generate_evaluation_report(predictions_data, available_models, output_dir):
     """Generate comprehensive evaluation report"""
     print("\n📋 Generating evaluation report...")
@@ -472,61 +572,65 @@ def main():
     if predictions_data is None:
         print("❌ No model predictions found.")
         print("Please train a model first:")
-        print("  python scripts/workflow-to-training-lgb.py")
+        print("  make train-lgb-config")
         sys.exit(1)
     
     # Evaluate each model
     for model_name in available_models:
         print(f"\n🔍 Evaluating {model_name}...")
         
-        oof_df = predictions_data[model_name]['oof_predictions']
+        model_info = predictions_data[model_name]
+        cv_results = model_info['cv_results']
         
-        # Calculate comprehensive metrics
-        metrics = evaluate_composite_metrics(oof_df['true_label'], oof_df['oof_prediction'])
-        print(f"  Composite F1: {metrics['composite_f1']:.4f}")
-        print(f"  Binary F1: {metrics['binary_f1']:.4f}")
-        print(f"  Macro F1: {metrics['macro_f1']:.4f}")
+        # Display CV results
+        print(f"  CV Score: {cv_results.get('cv_score', 'N/A'):.4f}")
+        print(f"  CV Std: {cv_results.get('cv_std', 'N/A'):.4f}")
+        print(f"  Phase: {cv_results.get('phase', 'N/A')}")
+        print(f"  Algorithm: {cv_results.get('algorithm', 'N/A')}")
         
-        # Analyze confusion matrix
-        cm, cm_norm, class_metrics = analyze_confusion_matrix(
-            oof_df['true_label'], oof_df['oof_prediction'], model_name, plots_dir
-        )
-        
-        # Identify misclassification patterns
-        misclass_analysis = identify_misclassification_patterns(oof_df, plots_dir)
+        # Check if OOF predictions are available for detailed analysis
+        if 'oof_predictions' in model_info:
+            oof_df = model_info['oof_predictions']
+            print(f"  ✓ OOF predictions available for detailed analysis")
+            
+            # Calculate comprehensive metrics
+            metrics = evaluate_composite_metrics(oof_df['true_label'], oof_df['oof_prediction'])
+            print(f"  Composite F1: {metrics['composite_f1']:.4f}")
+            print(f"  Binary F1: {metrics['binary_f1']:.4f}")
+            print(f"  Macro F1: {metrics['macro_f1']:.4f}")
+            
+            # Analyze confusion matrix
+            cm, cm_norm, class_metrics = analyze_confusion_matrix(
+                oof_df['true_label'], oof_df['oof_prediction'], model_name, plots_dir
+            )
+            
+            # Identify misclassification patterns
+            misclass_analysis = identify_misclassification_patterns(oof_df, plots_dir)
+        else:
+            print(f"  ⚠️ OOF predictions not available - CV results only")
     
-    # Per-participant analysis (for any model)
-    main_oof_df = predictions_data[available_models[0]]['oof_predictions']
-    participant_df = analyze_per_participant_performance(main_oof_df, plots_dir)
-    
-    # Compare models if multiple available
-    comparison_df = compare_models(predictions_data, available_models, plots_dir)
-    
-    # Generate comprehensive report
-    generate_evaluation_report(predictions_data, available_models, output_dir)
+    # Generate simplified evaluation report
+    generate_simplified_report(predictions_data, available_models, output_dir)
     
     print("\n" + "=" * 50)
     print("✅ Model evaluation completed!")
     print(f"📁 Results saved to: {output_dir}")
     
-    # Determine best model
-    best_model = available_models[0]  # Default to first model
-    if len(available_models) > 1:
-        # Find best model based on composite F1
-        best_score = 0
-        for model_name in available_models:
-            oof_df = predictions_data[model_name]['oof_predictions']
-            metrics = evaluate_composite_metrics(oof_df['true_label'], oof_df['oof_prediction'])
-            if metrics['composite_f1'] > best_score:
-                best_score = metrics['composite_f1']
-                best_model = model_name
-        
-        print(f"🏆 Best model: {best_model} (F1: {best_score:.4f})")
+    # Determine best model based on CV score
+    best_model = available_models[0]
+    best_score = 0
+    for model_name in available_models:
+        cv_score = predictions_data[model_name]['cv_results'].get('cv_score', 0)
+        if cv_score > best_score:
+            best_score = cv_score
+            best_model = model_name
+    
+    print(f"🏆 Best model: {best_model} (CV: {best_score:.4f})")
     
     print("\n🚀 Next steps:")
-    print("  1. Review EVALUATION_REPORT.md and generated plots")
-    print("  2. python scripts/workflow-to-feature-importance.py  # Feature analysis")
-    print("  3. python scripts/workflow-to-training-cnn.py        # Try deep learning")
+    print("  1. Review EVALUATION_REPORT.md")
+    print("  2. make feature-importance  # Feature analysis")
+    print("  3. make train-cnn           # Try deep learning")
     print("  4. Address identified weaknesses in error patterns")
 
 if __name__ == "__main__":
