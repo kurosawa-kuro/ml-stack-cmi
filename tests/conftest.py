@@ -14,44 +14,74 @@ from typing import Tuple, Dict, Any
 
 @pytest.fixture
 def sample_bronze_data() -> pd.DataFrame:
-    """基本的なブロンズレベルのテストデータ"""
+    """基本的なブロンズレベルのテストデータ（CMIセンサーデータ）"""
     return pd.DataFrame({
-        "Time_spent_Alone": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "Social_event_attendance": [2.0, 4.0, 6.0, 8.0, 10.0],
-        "Going_outside": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "Friends_circle_size": [5, 10, 15, 20, 25],
-        "Post_frequency": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "Stage_fear": ["Yes", "No", "Yes", "No", "Yes"],
-        "Drained_after_socializing": ["No", "Yes", "No", "Yes", "No"],
-        "Personality": ["Introvert", "Extrovert", "Introvert", "Extrovert", "Introvert"]
+        "row_id": [1, 2, 3, 4, 5],
+        "subject": [1, 1, 2, 2, 3],
+        "sequence_id": [1, 1, 2, 2, 3],
+        "sequence_counter": [0, 1, 0, 1, 0],
+        "acc_x": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "acc_y": [0.2, 0.3, 0.4, 0.5, 0.6],
+        "acc_z": [9.8, 9.9, 10.0, 10.1, 10.2],
+        "rot_x": [0.01, 0.02, 0.03, 0.04, 0.05],
+        "rot_y": [0.02, 0.03, 0.04, 0.05, 0.06],
+        "rot_z": [0.03, 0.04, 0.05, 0.06, 0.07],
+        "tof_0": [100, 150, 200, 250, 300],
+        "tof_1": [120, 170, 220, 270, 320],
+        "thm_0": [25.0, 25.5, 26.0, 26.5, 27.0],
+        "thm_1": [25.1, 25.6, 26.1, 26.6, 27.1],
+        "behavior": ["no_behavior", "behavior_1", "no_behavior", "behavior_2", "no_behavior"],
+        "gesture": ["none", "gesture_1", "none", "gesture_2", "none"]
     })
 
 
 @pytest.fixture
 def sample_silver_data() -> pd.DataFrame:
-    """シルバーレベルのテストデータ（エンコード済み）"""
+    """シルバーレベルのテストデータ（エンジニアリング済み）"""
     return pd.DataFrame({
-        "Time_spent_Alone": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "Social_event_attendance": [2.0, 4.0, 6.0, 8.0, 10.0],
-        "Going_outside": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "Friends_circle_size": [5, 10, 15, 20, 25],
-        "Post_frequency": [1.0, 2.0, 3.0, 4.0, 5.0],
-        "Stage_fear_encoded": [1.0, 0.0, 1.0, 0.0, 1.0],
-        "Drained_after_socializing_encoded": [0.0, 1.0, 0.0, 1.0, 0.0],
-        "Personality": ["Introvert", "Extrovert", "Introvert", "Extrovert", "Introvert"]
+        "row_id": [1, 2, 3, 4, 5],
+        "subject": [1, 1, 2, 2, 3],
+        "sequence_id": [1, 1, 2, 2, 3],
+        "acc_x": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "acc_y": [0.2, 0.3, 0.4, 0.5, 0.6],
+        "acc_z": [9.8, 9.9, 10.0, 10.1, 10.2],
+        "rot_x": [0.01, 0.02, 0.03, 0.04, 0.05],
+        "rot_y": [0.02, 0.03, 0.04, 0.05, 0.06],
+        "rot_z": [0.03, 0.04, 0.05, 0.06, 0.07],
+        "tof_0": [100, 150, 200, 250, 300],
+        "tof_1": [120, 170, 220, 270, 320],
+        "thm_0": [25.0, 25.5, 26.0, 26.5, 27.0],
+        "thm_1": [25.1, 25.6, 26.1, 26.6, 27.1],
+        "imu_total_motion": [9.8, 9.9, 10.0, 10.1, 10.2],
+        "movement_intensity": [0.04, 0.05, 0.06, 0.07, 0.08],
+        "thermal_distance_interaction": [-0.1, -0.1, -0.1, -0.1, -0.1],
+        "behavior": ["no_behavior", "behavior_1", "no_behavior", "behavior_2", "no_behavior"],
+        "gesture": ["none", "gesture_1", "none", "gesture_2", "none"]
     })
 
 
 @pytest.fixture
 def sample_gold_data() -> pd.DataFrame:
-    """ゴールドレベルのテストデータ（特徴量エンジニアリング済み）"""
+    """ゴールドレベルのテストデータ（ML-ready）"""
     return pd.DataFrame({
-        "id": [1, 2, 3, 4, 5],
-        "extrovert_score": [8, 16, 24, 32, 40],
-        "introvert_score": [6, 6, 10, 6, 10],
-        "social_ratio": [2.0, 2.0, 2.0, 2.0, 2.0],
-        "activity_sum": [3, 6, 9, 12, 15],
-        "Personality": ["Introvert", "Extrovert", "Introvert", "Extrovert", "Introvert"]
+        "row_id": [1, 2, 3, 4, 5],
+        "participant_id": [1, 1, 2, 2, 3],
+        "acc_x": [0.1, 0.2, 0.3, 0.4, 0.5],
+        "acc_y": [0.2, 0.3, 0.4, 0.5, 0.6],
+        "acc_z": [9.8, 9.9, 10.0, 10.1, 10.2],
+        "rot_x": [0.01, 0.02, 0.03, 0.04, 0.05],
+        "rot_y": [0.02, 0.03, 0.04, 0.05, 0.06],
+        "rot_z": [0.03, 0.04, 0.05, 0.06, 0.07],
+        "tof_0": [100, 150, 200, 250, 300],
+        "tof_1": [120, 170, 220, 270, 320],
+        "thm_0": [25.0, 25.5, 26.0, 26.5, 27.0],
+        "thm_1": [25.1, 25.6, 26.1, 26.6, 27.1],
+        "imu_total_motion": [9.8, 9.9, 10.0, 10.1, 10.2],
+        "movement_intensity": [0.04, 0.05, 0.06, 0.07, 0.08],
+        "thermal_distance_interaction": [-0.1, -0.1, -0.1, -0.1, -0.1],
+        "label": ["no_behavior", "behavior_1", "no_behavior", "behavior_2", "no_behavior"],
+        "label_encoded": [0, 1, 0, 2, 0],
+        "label_binary": [0, 1, 0, 1, 0]
     })
 
 
@@ -87,16 +117,23 @@ def large_test_data() -> pd.DataFrame:
     n_samples = 1000
     
     data = {
-        'id': range(n_samples),
-        'Time_spent_Alone': np.random.uniform(0, 24, n_samples),
-        'Social_event_attendance': np.random.randint(0, 20, n_samples),
-        'Going_outside': np.random.randint(0, 15, n_samples),
-        'Friends_circle_size': np.random.randint(0, 50, n_samples),
-        'Post_frequency': np.random.randint(0, 30, n_samples),
-        'Stage_fear': np.random.choice(['Yes', 'No'], n_samples),
-        'Drained_after_socializing': np.random.choice(['Yes', 'No'], n_samples),
-        'Personality': np.random.choice(['Extrovert', 'Introvert'], n_samples),
-        'Personality_encoded': np.random.randint(0, 2, n_samples)  # 追加
+        'row_id': range(n_samples),
+        'subject': np.random.randint(1, 21, n_samples),
+        'sequence_id': np.random.randint(1, 101, n_samples),
+        'sequence_counter': np.random.randint(0, 100, n_samples),
+        'acc_x': np.random.normal(0, 1, n_samples),
+        'acc_y': np.random.normal(0, 1, n_samples),
+        'acc_z': np.random.normal(9.8, 1, n_samples),
+        'rot_x': np.random.normal(0, 0.1, n_samples),
+        'rot_y': np.random.normal(0, 0.1, n_samples),
+        'rot_z': np.random.normal(0, 0.1, n_samples),
+        'tof_0': np.random.uniform(50, 500, n_samples),
+        'tof_1': np.random.uniform(50, 500, n_samples),
+        'thm_0': np.random.normal(25, 2, n_samples),
+        'thm_1': np.random.normal(25, 2, n_samples),
+        'behavior': np.random.choice(['no_behavior', 'behavior_1', 'behavior_2'], n_samples),
+        'gesture': np.random.choice(['none', 'gesture_1', 'gesture_2'], n_samples),
+        'label_encoded': np.random.randint(0, 3, n_samples)  # 追加
     }
     
     return pd.DataFrame(data)

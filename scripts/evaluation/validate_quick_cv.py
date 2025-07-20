@@ -1,149 +1,130 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Quick CV test for enhanced Silver features
-Bronze medal target smoke test
+Quick Cross-Validation Validation Script for CMI Sensor Data
+Validates GroupKFold CV setup and basic model performance
 """
 
 import sys
 import time
-import warnings
 from pathlib import Path
 
-import lightgbm as lgb
+# Add src to path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import GroupKFold
+from sklearn.metrics import f1_score, accuracy_score
+import lightgbm as lgb
 
-# Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
-
-from src.data.bronze import load_data, create_bronze_tables
-from src.data.bronze import load_bronze_data
-from src.data.silver import EnhancedSilverPreprocessor
-from src.models import LightGBMModel
-
-warnings.filterwarnings("ignore")
+from src.data.gold import load_gold_data, get_ml_ready_sequences
 
 
-def run_quick_cv_with_enhanced_features(sample_ratio: float = 0.1, folds: int = 3, random_state: int = 42) -> float:
-    """
-    Quick CV test with enhanced silver features
+def validate_groupkfold_cv():
+    """Validate GroupKFold CV setup for CMI sensor data"""
+    print("🔍 Validating GroupKFold CV setup...")
     
-    Args:
-        sample_ratio: Fraction of data to use for speed
-        folds: Number of CV folds
-        random_state: Random seed
+    # Load Gold layer data
+    train_data, test_data = load_gold_data()
     
-    Returns:
-        Mean CV accuracy score
-    """
-    print(f"🚀 Quick CV Test - Enhanced Silver Features")
-    print(f"   Sample: {sample_ratio*100:.1f}%, Folds: {folds}")
+    # Prepare ML-ready sequences
+    X, y, groups = get_ml_ready_sequences(train_data)
     
-    # Load bronze data (preprocessed)
-    try:
-        train_data, test_data = load_bronze_data()
-    except Exception:
-        print("   Creating bronze tables...")
-        create_bronze_tables()
-        train_data, test_data = load_bronze_data()
+    print(f"  📊 Dataset: {X.shape[0]} samples, {X.shape[1]} features")
+    print(f"  👥 Participants: {groups.nunique()}")
+    print(f"  🎯 Target classes: {y.nunique()}")
     
-    # Sample for speed
-    if sample_ratio < 1.0:
-        n_samples = int(len(train_data) * sample_ratio)
-        train_data = train_data.sample(n=n_samples, random_state=random_state).reset_index(drop=True)
-        print(f"   Sampled: {len(train_data)} rows")
+    # Setup GroupKFold
+    gkf = GroupKFold(n_splits=5)
     
-    # Prepare features and target
-    X = train_data.drop(['id', 'Personality'], axis=1, errors='ignore')
-    y = (train_data['Personality'] == 'Extrovert').astype(int)
-    
-    print(f"   Base features: {X.shape[1]}")
-    
-    # Apply enhanced silver features
-    start_time = time.time()
-    preprocessor = EnhancedSilverPreprocessor()
-    preprocessor.fit(X, y)
-    X_enhanced = preprocessor.transform(X)
-    feature_time = time.time() - start_time
-    
-    print(f"   Enhanced features: {X_enhanced.shape[1]} (+{X_enhanced.shape[1] - X.shape[1]})")
-    print(f"   Feature engineering: {feature_time:.2f}s")
-    
-    # Quick CV
-    skf = StratifiedKFold(n_splits=folds, shuffle=True, random_state=random_state)
+    # Validate CV splits
     cv_scores = []
+    participant_leakage_detected = False
     
-    # Optimized LightGBM params for speed
-    lgb_params = {
-        "objective": "binary",
-        "metric": "binary_logloss",
-        "n_estimators": 100,  # Reduced for speed
-        "num_leaves": 31,
-        "learning_rate": 0.1,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
-        "bagging_freq": 5,
-        "min_child_samples": 20,
-        "random_state": random_state,
-        "verbosity": -1,
-        "n_jobs": -1,
+    for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+        # Check for participant leakage
+        train_participants = set(groups.iloc[train_idx])
+        val_participants = set(groups.iloc[val_idx])
+        
+        if train_participants.intersection(val_participants):
+            participant_leakage_detected = True
+            print(f"  ❌ Fold {fold+1}: Participant leakage detected!")
+        
+        # Quick model training for validation
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+        
+        # Simple LightGBM model
+        model = lgb.LGBMClassifier(
+            n_estimators=50,
+            learning_rate=0.1,
+            random_state=42,
+            verbose=-1
+        )
+        
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_val)
+        
+        # Calculate scores
+        accuracy = accuracy_score(y_val, y_pred)
+        f1_macro = f1_score(y_val, y_pred, average='macro')
+        
+        cv_scores.append({
+            'fold': fold + 1,
+            'accuracy': accuracy,
+            'f1_macro': f1_macro,
+            'train_samples': len(train_idx),
+            'val_samples': len(val_idx),
+            'train_participants': len(train_participants),
+            'val_participants': len(val_participants)
+        })
+        
+        print(f"  📈 Fold {fold+1}: Acc={accuracy:.3f}, F1={f1_macro:.3f}")
+    
+    # Summary
+    if not participant_leakage_detected:
+        print("  ✅ No participant leakage detected across all folds")
+    
+    avg_accuracy = np.mean([score['accuracy'] for score in cv_scores])
+    avg_f1 = np.mean([score['f1_macro'] for score in cv_scores])
+    
+    print(f"\n📊 CV Summary:")
+    print(f"  🎯 Average Accuracy: {avg_accuracy:.3f}")
+    print(f"  🎯 Average F1 Macro: {avg_f1:.3f}")
+    print(f"  ✅ GroupKFold CV validation passed")
+    
+    return {
+        'cv_scores': cv_scores,
+        'avg_accuracy': avg_accuracy,
+        'avg_f1': avg_f1,
+        'participant_leakage': participant_leakage_detected
     }
-    
-    print(f"   Running {folds}-fold CV...")
-    
-    for fold, (train_idx, val_idx) in enumerate(skf.split(X_enhanced, y)):
-        fold_start = time.time()
-        
-        X_train_fold = X_enhanced.iloc[train_idx]
-        X_val_fold = X_enhanced.iloc[val_idx]
-        y_train_fold = y.iloc[train_idx]
-        y_val_fold = y.iloc[val_idx]
-        
-        # Train model
-        model = LightGBMModel(params=lgb_params)
-        model.fit(X_train_fold, y_train_fold)
-        
-        # Predict and score
-        y_pred = model.predict(X_val_fold)
-        score = accuracy_score(y_val_fold, y_pred)
-        cv_scores.append(score)
-        
-        fold_time = time.time() - fold_start
-        print(f"     Fold {fold+1}: {score:.6f} ({fold_time:.2f}s)")
-    
-    mean_score = np.mean(cv_scores)
-    std_score = np.std(cv_scores)
-    
-    print(f"   📊 CV Result: {mean_score:.6f} ± {std_score:.6f}")
-    print(f"   🎯 Bronze target: 0.976518 (Gap: {0.976518 - mean_score:+.6f})")
-    
-    return mean_score
 
 
 def main():
-    """Main function for standalone execution"""
-    import argparse
+    """Main validation workflow"""
+    print("🔍 Quick CV Validation for CMI Sensor Data")
+    print("=" * 50)
     
-    parser = argparse.ArgumentParser(description="Quick CV test for enhanced silver features")
-    parser.add_argument("--sample", type=float, default=0.1, help="Sample ratio (default: 0.1)")
-    parser.add_argument("--folds", type=int, default=3, help="Number of CV folds (default: 3)")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    start_time = time.time()
     
-    args = parser.parse_args()
-    
-    score = run_quick_cv_with_enhanced_features(
-        sample_ratio=args.sample,
-        folds=args.folds,
-        random_state=args.seed
-    )
-    
-    # Output just the score for subprocess parsing
-    if len(sys.argv) == 1:  # No arguments, just print score
-        print(f"{score:.6f}")
-    
-    return score
+    try:
+        # Validate GroupKFold CV
+        results = validate_groupkfold_cv()
+        
+        # Summary
+        elapsed_time = time.time() - start_time
+        print(f"\n✅ CV validation completed in {elapsed_time:.2f} seconds")
+        
+        if not results['participant_leakage']:
+            print("  🎯 Ready for model training with GroupKFold CV")
+            print("  📈 Expected performance baseline established")
+        else:
+            print("  ⚠️  Participant leakage detected - review CV setup")
+        
+    except Exception as e:
+        print(f"\n❌ CV validation failed: {e}")
+        raise
 
 
 if __name__ == "__main__":

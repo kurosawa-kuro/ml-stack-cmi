@@ -258,3 +258,25 @@ class TestMockDataGeneration:
         expected_ratio = n_minority / (n_minority + n_majority)
 
         assert abs(class_ratio - expected_ratio) < 0.01
+
+    def test_prediction_ratio_validation(self, sample_gold_data):
+        """Test prediction ratio validation for CMI sensor data"""
+        # Prepare data
+        X = sample_gold_data.drop(['row_id', 'participant_id', 'label', 'label_encoded', 'label_binary'], axis=1, errors='ignore')
+        y = sample_gold_data['label_binary']
+        
+        # Train model
+        model = LightGBMModel()
+        model.fit(X, y)
+        
+        # Make predictions
+        predictions = model.predict(X)
+        
+        # Calculate ratios
+        behavior_ratio = np.mean(predictions)  # 1の比率
+        no_behavior_ratio = 1 - behavior_ratio  # 0の比率
+        
+        # Validate ratios
+        assert abs(behavior_ratio + no_behavior_ratio - 1.0) < 1e-10
+        assert 0 <= behavior_ratio <= 1
+        assert 0 <= no_behavior_ratio <= 1

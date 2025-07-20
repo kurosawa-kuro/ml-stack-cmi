@@ -348,7 +348,7 @@ def create_gold_tables() -> None:
     # Apply Gold layer processing pipeline (CLAUDE.md specification)
     
     # Step 1: BFRB target encoding for training data
-    target_col = 'label' if 'label' in train_silver.columns else 'Personality'
+    target_col = 'label' if 'label' in train_silver.columns else 'behavior'
     print(f"Target column detected: {target_col}")
     
     train_gold = encode_bfrb_target(train_silver, target_col=target_col)

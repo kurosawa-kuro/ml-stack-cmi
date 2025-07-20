@@ -78,19 +78,23 @@ def calculate_prediction_distribution(predictions: np.ndarray) -> Dict[str, floa
     Returns:
         Dictionary with distribution statistics
     """
-    extrovert_ratio = np.mean(predictions == 1)
-    introvert_ratio = np.mean(predictions == 0)
-
+    # Calculate prediction statistics
+    behavior_ratio = np.mean(predictions == 1)
+    no_behavior_ratio = np.mean(predictions == 0)
+    
+    # Validate prediction ratios
+    assert abs(behavior_ratio + no_behavior_ratio - 1.0) < 1e-10, "Prediction ratios must sum to 1"
+    
     return {
-        "extrovert_ratio": extrovert_ratio,
-        "introvert_ratio": introvert_ratio,
-        "extrovert_count": int(np.sum(predictions == 1)),
-        "introvert_count": int(np.sum(predictions == 0)),
         "total_predictions": len(predictions),
-        # Additional keys for test compatibility
-        "class_0_count": int(np.sum(predictions == 0)),
-        "class_1_count": int(np.sum(predictions == 1)),
-        "cv_score": extrovert_ratio  # Mock CV score for test compatibility
+        "behavior_ratio": behavior_ratio,
+        "no_behavior_ratio": no_behavior_ratio,
+        "behavior_count": int(np.sum(predictions == 1)),
+        "no_behavior_count": int(np.sum(predictions == 0)),
+        "prediction_range": (predictions.min(), predictions.max()),
+        "prediction_mean": float(predictions.mean()),
+        "prediction_std": float(predictions.std()),
+        "cv_score": behavior_ratio  # Mock CV score for test compatibility
     }
 
 

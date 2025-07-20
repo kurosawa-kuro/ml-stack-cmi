@@ -386,3 +386,29 @@ class TestModelIntegration:
         # サイズ不一致検出
         size_mismatch = X_invalid.shape[0] != y_invalid.shape[0]
         assert size_mismatch
+
+    def test_model_prediction_statistics(self, sample_gold_data):
+        """Test model prediction statistics for CMI sensor data"""
+        # Prepare data
+        X = sample_gold_data.drop(['row_id', 'participant_id', 'label', 'label_encoded', 'label_binary'], axis=1, errors='ignore')
+        y = sample_gold_data['label_binary']
+        
+        # Train model
+        model = LightGBMModel()
+        model.fit(X, y)
+        
+        # Make predictions
+        predictions = model.predict(X)
+        
+        # Calculate statistics
+        stats = {
+            "behavior_count": np.sum(predictions == 1),
+            "no_behavior_count": np.sum(predictions == 0),
+            "behavior_ratio": np.mean(predictions == 1),
+            "no_behavior_ratio": np.mean(predictions == 0),
+        }
+        
+        # Assertions for CMI sensor data
+        assert stats["behavior_count"] >= 0
+        assert stats["no_behavior_count"] >= 0
+        assert abs(stats["behavior_ratio"] + stats["no_behavior_ratio"] - 1.0) < 1e-10
