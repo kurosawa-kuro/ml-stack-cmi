@@ -1,9 +1,8 @@
-"""
-Bronze Level Data Management
-Raw Data Standardization & Quality Assurance (Entry Point to Medallion Pipeline)
+"""Bronze Level Data Management for CMI Sensor Data
+Raw Sensor Data Standardization & Quality Assurance (Entry Point to Medallion Pipeline)
 """
 
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
 import warnings
 
 import duckdb
@@ -20,513 +19,320 @@ warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow encountered in multiply')
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow encountered in reduce')
 
+# CMI Sensor Data Configuration
+SENSOR_COLUMNS = {
+    'accelerometer': ['acc_x', 'acc_y', 'acc_z'],
+    'gyroscope': ['rot_w', 'rot_x', 'rot_y', 'rot_z'],
+    'thermopile': ['thm_1', 'thm_2', 'thm_3', 'thm_4', 'thm_5'],
+    'tof_sensors': [f'tof_{sensor}_v{channel}' for sensor in range(1, 6) for channel in range(64)]
+}
+
+# Metadata columns
+METADATA_COLUMNS = ['row_id', 'sequence_type', 'sequence_id', 'sequence_counter', 
+                   'subject', 'orientation', 'behavior', 'phase', 'gesture']
+
+# Target column for classification
+TARGET_COLUMNS = ['behavior', 'gesture']
+
 
 def load_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Raw data access point - Single source entry to Medallion pipeline"""
+    """Raw CMI sensor data access point - Single source entry to Medallion pipeline"""
     conn = duckdb.connect(DB_PATH)
-    train = conn.execute("SELECT * FROM playground_series_s5e7.train").df()
-    test = conn.execute("SELECT * FROM playground_series_s5e7.test").df()
-    conn.close()
+    try:
+        train = conn.execute("SELECT * FROM cmi_detect_behavior_with_sensor_data.train").df()
+        test = conn.execute("SELECT * FROM cmi_detect_behavior_with_sensor_data.test").df()
+    except Exception as e:
+        print(f"Error loading CMI data: {e}")
+        raise
+    finally:
+        conn.close()
     
-    # Explicit dtype setting for LightGBM optimization
-    train = _set_optimal_dtypes(train)
-    test = _set_optimal_dtypes(test)
+    # Explicit dtype setting for sensor data optimization
+    train = _set_optimal_dtypes_cmi(train)
+    test = _set_optimal_dtypes_cmi(test)
     
     return train, test
 
 
-def _set_optimal_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """Set optimal dtypes for LightGBM compatibility and performance"""
+def _set_optimal_dtypes_cmi(df: pd.DataFrame) -> pd.DataFrame:
+    """Set optimal dtypes for CMI sensor data LightGBM compatibility and performance"""
     df = df.copy()
     
-    # Numeric features - use float32 for memory efficiency when possible
-    numeric_cols = ['Time_spent_Alone', 'Social_event_attendance', 'Going_outside', 
-                   'Friends_circle_size', 'Post_frequency']
+    # Sensor data - use float32 for memory efficiency
+    all_sensor_cols = (
+        SENSOR_COLUMNS['accelerometer'] + 
+        SENSOR_COLUMNS['gyroscope'] + 
+        SENSOR_COLUMNS['thermopile'] + 
+        SENSOR_COLUMNS['tof_sensors']
+    )
     
-    for col in numeric_cols:
+    for col in all_sensor_cols:
         if col in df.columns:
-            # Check if values fit in float32 range
-            if df[col].dtype in ['float64', 'float32']:
-                col_min, col_max = df[col].min(), df[col].max()
-                if col_min >= -3.4e38 and col_max <= 3.4e38:
-                    df[col] = df[col].astype('float64')  # Use float64 for numerical stability
-                else:
-                    df[col] = df[col].astype('float64')
-            elif df[col].dtype in ['int64', 'int32']:
-                # Convert integers to float64 for LightGBM and numerical stability
-                df[col] = df[col].astype('float64')
+            # Convert sensor data to float32 for memory efficiency
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
+    
+    # Sequence counter as int32
+    if 'sequence_counter' in df.columns:
+        df['sequence_counter'] = df['sequence_counter'].astype('int32')
     
     # Categorical features - ensure object type for processing
-    categorical_cols = ['Stage_fear', 'Drained_after_socializing']
+    categorical_cols = ['sequence_type', 'subject', 'orientation', 'behavior', 'phase', 'gesture']
     for col in categorical_cols:
         if col in df.columns:
-            # Convert to string first, then to object
-            df[col] = df[col].astype(str).astype('object')
+            df[col] = df[col].astype('object')
+    
+    # String IDs
+    id_cols = ['row_id', 'sequence_id']
+    for col in id_cols:
+        if col in df.columns:
+            df[col] = df[col].astype('object')
     
     return df
 
 
-def validate_data_quality(df: pd.DataFrame) -> Dict[str, Any]:
-    """Type validation and range guards for data quality assurance"""
+def validate_data_quality_cmi(df: pd.DataFrame) -> Dict[str, Any]:
+    """Type validation and range guards for CMI sensor data quality assurance"""
     validation_results = {
         'type_validation': {},
         'range_validation': {},
         'schema_validation': {},
-        'quality_metrics': {}
+        'quality_metrics': {},
+        'sensor_validation': {}
     }
     
-    # Type validation
-    expected_numeric = ['Time_spent_Alone', 'Social_event_attendance', 'Going_outside', 
-                       'Friends_circle_size', 'Post_frequency']
-    expected_categorical = ['Stage_fear', 'Drained_after_socializing']
+    # Type validation for sensor data
+    all_sensor_cols = (
+        SENSOR_COLUMNS['accelerometer'] + 
+        SENSOR_COLUMNS['gyroscope'] + 
+        SENSOR_COLUMNS['thermopile']
+    )
     
-    for col in expected_numeric:
+    for col in all_sensor_cols:
         if col in df.columns:
             validation_results['type_validation'][col] = pd.api.types.is_numeric_dtype(df[col])
     
-    for col in expected_categorical:
+    # Categorical type validation
+    for col in ['sequence_type', 'subject', 'orientation', 'behavior', 'phase', 'gesture']:
         if col in df.columns:
             validation_results['type_validation'][col] = df[col].dtype == 'object'
     
-    # Range validation with more comprehensive checks
-    if 'Time_spent_Alone' in df.columns:
-        # 数値型かどうかをチェックしてから比較
-        if pd.api.types.is_numeric_dtype(df['Time_spent_Alone']):
-            validation_results['range_validation']['Time_spent_Alone'] = {
-                'within_24hrs': (df['Time_spent_Alone'] <= 24).all(),
-                'non_negative': (df['Time_spent_Alone'] >= 0).all(),
-                'finite_values': np.isfinite(df['Time_spent_Alone']).all()
-            }
-        else:
-            validation_results['range_validation']['Time_spent_Alone'] = {
-                'within_24hrs': False,
-                'non_negative': False,
-                'finite_values': False
-            }
-    
-    for col in ['Social_event_attendance', 'Going_outside', 'Friends_circle_size', 'Post_frequency']:
-        if col in df.columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
+    # Range validation for sensor data
+    if 'acc_x' in df.columns:
+        acc_cols = SENSOR_COLUMNS['accelerometer']
+        for col in acc_cols:
+            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
                 validation_results['range_validation'][col] = {
-                    'non_negative': (df[col] >= 0).all(),
+                    'reasonable_range': (df[col].abs() <= 50).all(),  # Reasonable accelerometer range
                     'finite_values': np.isfinite(df[col]).all()
                 }
-            else:
+    
+    # Thermopile validation
+    if 'thm_1' in df.columns:
+        thm_cols = SENSOR_COLUMNS['thermopile']
+        for col in thm_cols:
+            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
                 validation_results['range_validation'][col] = {
-                    'non_negative': False,
-                    'finite_values': False
+                    'reasonable_temp_range': ((df[col] >= 0) & (df[col] <= 100)).all(),  # Reasonable temp range
+                    'finite_values': np.isfinite(df[col]).all()
                 }
+    
+    # ToF sensor validation (many will have -1.0 for missing values)
+    tof_cols = [col for col in df.columns if col.startswith('tof_')]
+    if tof_cols:
+        validation_results['sensor_validation']['tof_missing_rate'] = {
+            col: (df[col] == -1.0).mean() for col in tof_cols[:10]  # Sample first 10
+        }
+    
+    # Participant and sequence validation
+    if 'subject' in df.columns:
+        validation_results['schema_validation']['unique_subjects'] = df['subject'].nunique()
+        validation_results['schema_validation']['subject_sample_sizes'] = df['subject'].value_counts().describe().to_dict()
+    
+    if 'sequence_id' in df.columns:
+        validation_results['schema_validation']['unique_sequences'] = df['sequence_id'].nunique()
     
     # Quality metrics
     validation_results['quality_metrics'] = {
         'total_rows': len(df),
         'total_columns': len(df.columns),
-        'missing_values': df.isnull().sum().sum(),
-        'duplicate_rows': df.duplicated().sum()
+        'missing_values_excluding_tof': df.drop(columns=tof_cols, errors='ignore').isnull().sum().sum(),
+        'tof_missing_values': df[tof_cols].isnull().sum().sum() if tof_cols else 0,
+        'duplicate_rows': df.duplicated().sum(),
+        'sensor_columns_count': len([col for col in df.columns if any(col.startswith(prefix) for prefix in ['acc_', 'rot_', 'thm_', 'tof_'])])
     }
     
     return validation_results
 
 
-def encode_categorical_robust(df: pd.DataFrame) -> pd.DataFrame:
-    """Yes/No normalization with case-insensitive unified mapping → {0,1}"""
+def normalize_sensor_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize sensor data for CMI dataset - Z-score normalization per sensor type"""
     df = df.copy()
     
-    categorical_columns = ['Stage_fear', 'Drained_after_socializing']
+    # IMU normalization (per-participant to handle individual differences)
+    imu_cols = SENSOR_COLUMNS['accelerometer'] + SENSOR_COLUMNS['gyroscope']
     
-    for col in categorical_columns:
+    for col in imu_cols:
         if col in df.columns:
-            # Handle NaN values first
-            df[col] = df[col].fillna('Unknown')
-            
-            # Case-insensitive Yes/No → 1/0 mapping
-            df[col] = df[col].astype(str).str.lower().str.strip()
-            
-            # More robust mapping
-            yes_values = ['yes', 'y', '1', 'true']
-            no_values = ['no', 'n', '0', 'false']
-            
-            # Create mapping dictionary
-            mapping_dict = {}
-            for yes_val in yes_values:
-                mapping_dict[yes_val] = 1.0
-            for no_val in no_values:
-                mapping_dict[no_val] = 0.0
-            
-            # Apply mapping, keep NaN for unknown values (LightGBM will handle)
-            df[col] = df[col].map(mapping_dict)
-            
-            # Convert to float64 for LightGBM compatibility
-            df[col] = df[col].astype('float64')
-            
-            # Create encoded column for compatibility
-            encoded_col = f"{col}_encoded"
-            df[encoded_col] = df[col]
-    
-    return df
-
-
-def advanced_missing_pattern_analysis(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    高度な欠損パターン分析と条件付き欠損フラグ生成
-    
-    Args:
-        df: 入力データフレーム
-        
-    Returns:
-        欠損パターンフラグが追加されたデータフレーム
-        
-    Expected Impact: +0.3-0.5%
-    """
-    df = df.copy()
-    
-    # 1. 基本的な欠損フラグ（既存実装の拡張）
-    high_impact_features = [
-        'Stage_fear', 'Drained_after_socializing', 'Going_outside',
-        'Time_spent_Alone', 'Social_event_attendance', 'Friends_circle_size'
-    ]
-    
-    for col in high_impact_features:
-        if col in df.columns:
-            missing_flag_col = f"{col}_missing"
-            df[missing_flag_col] = df[col].isna().astype('int32')
-    
-    # 2. 条件付き欠損フラグ（高相関パターン）
-    if 'Stage_fear' in df.columns and 'Drained_after_socializing' in df.columns:
-        # 両方同時欠損（社会的不安の完全回避パターン）
-        df['social_anxiety_complete_missing'] = (
-            df['Stage_fear'].isna() & df['Drained_after_socializing'].isna()
-        ).astype('int32')
-        
-        # 片方のみ欠損（部分的回避パターン）
-        df['social_anxiety_partial_missing'] = (
-            df['Stage_fear'].isna() ^ df['Drained_after_socializing'].isna()  # XOR
-        ).astype('int32')
-        
-        # 社会的疲労関連欠損（内向性指標）
-        if 'Social_event_attendance' in df.columns:
-            df['social_fatigue_missing'] = (
-                df['Drained_after_socializing'].isna() & 
-                (df['Social_event_attendance'] > df['Social_event_attendance'].quantile(0.7))
-            ).astype('int32')
-    
-    # 3. 行動パターン関連欠損
-    if 'Time_spent_Alone' in df.columns and 'Social_event_attendance' in df.columns:
-        # 高孤独時間 + ソーシャル欠損（極端な内向性）
-        df['extreme_introvert_missing'] = (
-            (df['Time_spent_Alone'] > df['Time_spent_Alone'].quantile(0.8)) & 
-            df['Social_event_attendance'].isna()
-        ).astype('int32')
-        
-        # 低孤独時間 + ソーシャル欠損（矛盾パターン）
-        df['contradictory_social_missing'] = (
-            (df['Time_spent_Alone'] < df['Time_spent_Alone'].quantile(0.2)) & 
-            df['Social_event_attendance'].isna()
-        ).astype('int32')
-    
-    # 4. 外出パターン関連欠損
-    if 'Going_outside' in df.columns and 'Social_event_attendance' in df.columns:
-        # 高外出頻度 + ソーシャルイベント欠損（非ソーシャル外出）
-        df['non_social_outing_missing'] = (
-            (df['Going_outside'] > df['Going_outside'].quantile(0.7)) & 
-            df['Social_event_attendance'].isna()
-        ).astype('int32')
-    
-    # 5. コミュニケーション関連欠損
-    if 'Post_frequency' in df.columns and 'Friends_circle_size' in df.columns:
-        # 高投稿頻度 + 友達数欠損（オンライン社交性）
-        df['online_social_missing'] = (
-            (df['Post_frequency'] > df['Post_frequency'].quantile(0.7)) & 
-            df['Friends_circle_size'].isna()
-        ).astype('int32')
-    
-    return df
-
-
-def cross_feature_imputation(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    クロス特徴量補完戦略
-    
-    Args:
-        df: 入力データフレーム
-        
-    Returns:
-        補完が適用されたデータフレーム
-        
-    Expected Impact: +0.2-0.4%
-    """
-    df = df.copy()
-    
-    # 1. Stage_fear ↔ Drained_after_socializing 相関ベース補完
-    if 'Stage_fear' in df.columns and 'Drained_after_socializing' in df.columns:
-        # 両方の特徴量が存在する場合の相関を計算
-        valid_mask = df['Stage_fear'].notna() & df['Drained_after_socializing'].notna()
-        if valid_mask.sum() > 10:  # 十分なサンプルがある場合
-            correlation = df.loc[valid_mask, ['Stage_fear', 'Drained_after_socializing']].corr().iloc[0, 1]
-            
-            if abs(correlation) > 0.3:  # 相関が高い場合のみ補完
-                # Stage_fearが欠損でDrained_after_socializingが存在する場合
-                stage_missing = df['Stage_fear'].isna() & df['Drained_after_socializing'].notna()
-                if stage_missing.any():
-                    # 相関に基づいて推定
-                    if correlation > 0:
-                        df.loc[stage_missing, 'Stage_fear'] = df.loc[stage_missing, 'Drained_after_socializing']
-                    else:
-                        df.loc[stage_missing, 'Stage_fear'] = 1 - df.loc[stage_missing, 'Drained_after_socializing']
-                
-                # Drained_after_socializingが欠損でStage_fearが存在する場合
-                drained_missing = df['Drained_after_socializing'].isna() & df['Stage_fear'].notna()
-                if drained_missing.any():
-                    if correlation > 0:
-                        df.loc[drained_missing, 'Drained_after_socializing'] = df.loc[drained_missing, 'Stage_fear']
-                    else:
-                        df.loc[drained_missing, 'Drained_after_socializing'] = 1 - df.loc[drained_missing, 'Stage_fear']
-    
-    # 2. 行動パターンベース補完
-    if 'Going_outside' in df.columns and 'Social_event_attendance' in df.columns:
-        # 高外出頻度 → ソーシャルイベント参加推定
-        high_outing = df['Going_outside'] > df['Going_outside'].quantile(0.7)
-        social_missing_outing = df['Social_event_attendance'].isna() & high_outing
-        
-        if social_missing_outing.any():
-            # 高外出頻度の人のソーシャルイベント参加率を推定
-            high_social_value = df.loc[high_outing & ~df['Social_event_attendance'].isna(), 'Social_event_attendance'].quantile(0.75)
-            df.loc[social_missing_outing, 'Social_event_attendance'] = high_social_value
-    
-    # 3. 時間配分ベース補完
-    if 'Time_spent_Alone' in df.columns and 'Going_outside' in df.columns:
-        # 低孤独時間 → 高外出頻度推定
-        low_alone = df['Time_spent_Alone'] < df['Time_spent_Alone'].quantile(0.2)
-        going_missing_alone = df['Going_outside'].isna() & low_alone
-        
-        if going_missing_alone.any():
-            high_going_value = df.loc[low_alone & ~df['Going_outside'].isna(), 'Going_outside'].quantile(0.75)
-            df.loc[going_missing_alone, 'Going_outside'] = high_going_value
-    
-    # 4. 友達数ベース補完
-    if 'Friends_circle_size' in df.columns and 'Social_event_attendance' in df.columns:
-        # 友達数からソーシャル活動を推定
-        friends_high = df['Friends_circle_size'] > df['Friends_circle_size'].quantile(0.7)
-        social_missing_friends = df['Social_event_attendance'].isna() & friends_high
-        
-        if social_missing_friends.any():
-            high_social_value = df.loc[friends_high & ~df['Social_event_attendance'].isna(), 'Social_event_attendance'].quantile(0.75)
-            df.loc[social_missing_friends, 'Social_event_attendance'] = high_social_value
-    
-    # 5. 投稿頻度ベース補完
-    if 'Post_frequency' in df.columns and 'Friends_circle_size' in df.columns:
-        # 高投稿頻度 → 高友達数（オンライン社交性）
-        post_high = df['Post_frequency'] > df['Post_frequency'].quantile(0.7)
-        friends_missing_post = df['Friends_circle_size'].isna() & post_high
-        
-        if friends_missing_post.any():
-            high_friends_value = df.loc[post_high & ~df['Friends_circle_size'].isna(), 'Friends_circle_size'].quantile(0.75)
-            df.loc[friends_missing_post, 'Friends_circle_size'] = high_friends_value
-    
-    return df
-
-
-def advanced_outlier_detection(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    高度な異常値検出と処理
-    
-    Args:
-        df: 入力データフレーム
-        
-    Returns:
-        異常値フラグが追加されたデータフレーム
-        
-    Expected Impact: +0.2-0.3%
-    """
-    df = df.copy()
-    
-    # 対象となる数値特徴量
-    numeric_cols = [
-        'Time_spent_Alone', 'Social_event_attendance', 'Going_outside', 
-        'Friends_circle_size', 'Post_frequency'
-    ]
-    
-    # 1. Isolation Forest による異常値検出
-    try:
-        # 数値データのみでIsolation Forest実行
-        available_numeric = [col for col in numeric_cols if col in df.columns]
-        if len(available_numeric) >= 2:  # 最低2つの特徴量が必要
-            numeric_data = df[available_numeric].fillna(df[available_numeric].median())
-            
-            # パラメータ調整（contamination=0.05で5%を異常値として検出）
-            iso_forest = IsolationForest(
-                contamination=0.05,  # 5%を異常値として検出
-                random_state=42,
-                n_estimators=100,
-                max_samples='auto'
-            )
-            
-            # 異常値スコアの計算
-            outlier_scores = iso_forest.fit_predict(numeric_data)
-            
-            # 異常値フラグ（-1が異常値）
-            df['isolation_forest_outlier'] = (outlier_scores == -1).astype('int32')
-            
-            # 異常値スコアの保存（連続値）
-            df['isolation_forest_score'] = iso_forest.decision_function(numeric_data).astype('float64')
-            
-        else:
-            df['isolation_forest_outlier'] = 0
-            df['isolation_forest_score'] = 0.0
-            
-    except Exception as e:
-        print(f"Isolation Forest failed: {e}")
-        df['isolation_forest_outlier'] = 0
-        df['isolation_forest_score'] = 0.0
-    
-    # 2. 統計的異常値検出（改良版IQR）
-    for col in numeric_cols:
-        if col in df.columns and df[col].notna().sum() > 10:
-            # 基本統計量の計算
-            Q1 = df[col].quantile(0.25)
-            Q3 = df[col].quantile(0.75)
-            IQR = Q3 - Q1
-            
-            # より厳密な境界設定（従来の1.5 → 2.5）
-            lower_bound = Q1 - 2.5 * IQR
-            upper_bound = Q3 + 2.5 * IQR
-            
-            # 異常値フラグ
-            outlier_flag = f"{col}_statistical_outlier"
-            df[outlier_flag] = ((df[col] < lower_bound) | (df[col] > upper_bound)).astype('int32')
-            
-            # 異常値スコア（境界からの距離）
-            df[f"{col}_outlier_score"] = np.where(
-                df[col] < lower_bound,
-                (lower_bound - df[col]) / IQR,
-                np.where(
-                    df[col] > upper_bound,
-                    (df[col] - upper_bound) / IQR,
-                    0
+            # Group by participant for normalization to prevent leakage
+            if 'subject' in df.columns:
+                # Per-participant normalization
+                df[col] = df.groupby('subject')[col].transform(
+                    lambda x: (x - x.mean()) / (x.std() + 1e-8)
                 )
-            )
+            else:
+                # Global normalization if no participant info
+                df[col] = (df[col] - df[col].mean()) / (df[col].std() + 1e-8)
     
-    # 3. Z-score ベース異常値検出
-    for col in numeric_cols:
-        if col in df.columns and df[col].notna().sum() > 10:
-            # Z-score計算
-            mean_val = df[col].mean()
-            std_val = df[col].std()
-            
-            if std_val > 0:
-                z_scores = np.abs((df[col] - mean_val) / std_val)
-                
-                # Z-score > 3 を異常値として検出
-                z_outlier_flag = f"{col}_zscore_outlier"
-                df[z_outlier_flag] = (z_scores > 3).astype('int32')
-                
-                # Z-score値の保存
-                df[f"{col}_zscore"] = z_scores
-    
-    # 4. 複合異常値フラグ
-    outlier_flags = [col for col in df.columns if col.endswith('_outlier')]
-    if outlier_flags:
-        # 複数の異常値検出手法で検出された異常値
-        df['multiple_outlier_detected'] = df[outlier_flags].sum(axis=1) >= 2
-        df['multiple_outlier_detected'] = df['multiple_outlier_detected'].astype('int32')
-        
-        # 異常値の総数
-        df['total_outlier_count'] = df[outlier_flags].sum(axis=1)
-    
-    # 5. ドメイン特化異常値検出
-    if 'Time_spent_Alone' in df.columns:
-        # 24時間を超える異常値
-        df['time_alone_extreme'] = (df['Time_spent_Alone'] > 24).astype('int32')
-        
-        # 負の値（データエラー）
-        df['time_alone_negative'] = (df['Time_spent_Alone'] < 0).astype('int32')
-    
-    if 'Friends_circle_size' in df.columns:
-        # 極端に大きな友達数（現実的でない値）
-        df['friends_extreme'] = (df['Friends_circle_size'] > 1000).astype('int32')
-    
-    if 'Post_frequency' in df.columns:
-        # 極端に高い投稿頻度
-        df['post_frequency_extreme'] = (df['Post_frequency'] > 100).astype('int32')
-    
-    return df
-
-
-def advanced_missing_strategy(df: pd.DataFrame) -> pd.DataFrame:
-    """Missing value intelligence with LightGBM native handling"""
-    df = df.copy()
-    
-    # Create missing flags for high-impact features (Winner Solution pattern)
-    high_impact_features = ['Stage_fear', 'Going_outside', 'Time_spent_Alone', 
-                           'Drained_after_socializing', 'Social_event_attendance']
-    
-    for col in high_impact_features:
+    # Thermopile normalization (temperature sensors)
+    thm_cols = SENSOR_COLUMNS['thermopile']
+    for col in thm_cols:
         if col in df.columns:
-            missing_flag_col = f"{col}_missing"
-            df[missing_flag_col] = df[col].isna().astype('int32')  # LightGBM optimized
-    
-    # Cross-feature missing pattern analysis
-    if 'Stage_fear' in df.columns and 'Drained_after_socializing' in df.columns:
-        # Create interaction missing flag
-        df['social_fatigue_missing'] = (
-            df['Stage_fear'].isna() & df['Drained_after_socializing'].isna()
-        ).astype('int32')
-    
-    # Preserve NaN for LightGBM native handling (don't impute)
-    # LightGBM will handle NaN values automatically in tree splits
+            # Global normalization for temperature (less individual variation expected)
+            df[col] = (df[col] - df[col].mean()) / (df[col].std() + 1e-8)
     
     return df
 
 
-def winsorize_outliers(df: pd.DataFrame, percentile: float = 0.01) -> pd.DataFrame:
-    """IQR-based outlier clipping for numeric stability"""
+def handle_tof_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Handle ToF sensor missing values (-1.0 indicates no detection)"""
     df = df.copy()
     
-    numeric_columns = ['Time_spent_Alone', 'Social_event_attendance', 'Going_outside', 
-                      'Friends_circle_size', 'Post_frequency']
+    # Get ToF columns
+    tof_cols = [col for col in df.columns if col.startswith('tof_')]
     
-    for col in numeric_columns:
-        if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
-            # Skip if too many NaN values
-            if df[col].isna().sum() > len(df) * 0.5:
-                continue
-                
-            # Calculate bounds using quantiles
-            lower_bound = df[col].quantile(percentile)
-            upper_bound = df[col].quantile(1 - percentile)
+    if tof_cols:
+        # Create all missing flags at once to avoid DataFrame fragmentation
+        missing_flags_data = {}
+        
+        for col in tof_cols:
+            missing_flag_col = f"{col}_missing"
+            missing_flags_data[missing_flag_col] = (df[col] == -1.0).astype('int8')
             
-            # Apply clipping
-            df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
+            # Replace -1.0 with NaN for proper handling
+            df[col] = df[col].replace(-1.0, np.nan)
+        
+        # Add all missing flags at once using pd.concat for better performance
+        missing_flags_df = pd.DataFrame(missing_flags_data, index=df.index)
+        df = pd.concat([df, missing_flags_df], axis=1)
     
     return df
 
 
-def enhanced_bronze_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    3つの高度な前処理を統合したブロンズ層処理
+def create_participant_groups(df: pd.DataFrame) -> pd.DataFrame:
+    """Create participant grouping information for GroupKFold CV"""
+    df = df.copy()
     
-    Args:
-        df: 生データフレーム
+    if 'subject' in df.columns:
+        # Create numeric participant IDs for GroupKFold
+        unique_subjects = df['subject'].unique()
+        subject_to_id = {subject: idx for idx, subject in enumerate(unique_subjects)}
+        df['participant_id'] = df['subject'].map(subject_to_id)
         
-    Returns:
-        高度な前処理が適用されたデータフレーム
+        # Add participant statistics
+        participant_stats = df.groupby('subject').agg({
+            'sequence_id': 'nunique',
+            'sequence_counter': 'count'
+        }).rename(columns={
+            'sequence_id': 'sequences_per_participant',
+            'sequence_counter': 'samples_per_participant'
+        })
         
-    Expected Total Impact: +0.7-1.2%
-    """
-    # 1. 高度な欠損パターン分析
-    df = advanced_missing_pattern_analysis(df)
+        df = df.merge(participant_stats, left_on='subject', right_index=True, how='left')
     
-    # 2. クロス特徴量補完戦略
-    df = cross_feature_imputation(df)
+    return df
+
+
+def create_sequence_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Create sequence-level features for time-series analysis"""
+    df = df.copy()
     
-    # 3. 異常値検出の高度化
-    df = advanced_outlier_detection(df)
+    if 'sequence_id' in df.columns and 'sequence_counter' in df.columns:
+        # Sequence position features
+        df['sequence_position'] = df['sequence_counter']
+        
+        # Sequence length (samples per sequence)
+        seq_lengths = df.groupby('sequence_id')['sequence_counter'].max() + 1
+        df = df.merge(seq_lengths.rename('sequence_length'), left_on='sequence_id', right_index=True, how='left')
+        
+        # Relative position in sequence
+        df['sequence_progress'] = df['sequence_counter'] / df['sequence_length']
+        
+        # Sequence statistics for each participant
+        if 'subject' in df.columns:
+            participant_seq_stats = df.groupby('subject')['sequence_length'].agg(['mean', 'std', 'count']).add_prefix('participant_seq_')
+            df = df.merge(participant_seq_stats, left_on='subject', right_index=True, how='left')
+    
+    return df
+
+
+def advanced_missing_strategy_cmi(df: pd.DataFrame) -> pd.DataFrame:
+    """Missing value intelligence for CMI sensor data with LightGBM native handling"""
+    df = df.copy()
+    
+    # Create missing flags for critical sensors
+    sensor_groups = ['accelerometer', 'gyroscope', 'thermopile']
+    
+    for group in sensor_groups:
+        cols = SENSOR_COLUMNS[group]
+        for col in cols:
+            if col in df.columns:
+                missing_flag_col = f"{col}_missing"
+                df[missing_flag_col] = df[col].isna().astype('int8')
+    
+    # Create group-level missing patterns
+    # IMU missing pattern (all IMU sensors missing together)
+    imu_cols = SENSOR_COLUMNS['accelerometer'] + SENSOR_COLUMNS['gyroscope']
+    if all(col in df.columns for col in imu_cols):
+        imu_missing = df[imu_cols].isna().all(axis=1)
+        df['imu_complete_missing'] = imu_missing.astype('int8')
+    
+    # Thermopile missing pattern
+    thm_cols = SENSOR_COLUMNS['thermopile']
+    if all(col in df.columns for col in thm_cols):
+        thm_missing = df[thm_cols].isna().all(axis=1)
+        df['thermopile_complete_missing'] = thm_missing.astype('int8')
+    
+    # Cross-sensor missing patterns
+    if 'acc_x' in df.columns and 'thm_1' in df.columns:
+        # Both IMU and thermal missing (complete sensor failure)
+        df['sensor_failure_missing'] = (
+            df['imu_complete_missing'] & df['thermopile_complete_missing']
+        ).astype('int8')
+    
+    return df
+
+
+def winsorize_outliers_cmi(df: pd.DataFrame, percentile: float = 0.01) -> pd.DataFrame:
+    """Sensor-specific outlier clipping for numeric stability"""
+    df = df.copy()
+    
+    # Different winsorization for different sensor types
+    sensor_configs = [
+        ('accelerometer', 0.001),  # More conservative for IMU
+        ('gyroscope', 0.001),
+        ('thermopile', 0.01)       # Less conservative for temperature
+    ]
+    
+    for sensor_type, perc in sensor_configs:
+        cols = SENSOR_COLUMNS[sensor_type]
+        
+        for col in cols:
+            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+                if df[col].isna().sum() > len(df) * 0.5:
+                    continue
+                    
+                # Calculate bounds using quantiles
+                lower_bound = df[col].quantile(perc)
+                upper_bound = df[col].quantile(1 - perc)
+                
+                # Apply clipping
+                df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
     
     return df
 
 
 def create_bronze_tables() -> None:
-    """Creates standardized bronze.train, bronze.test tables"""
+    """Creates standardized bronze.train, bronze.test tables for CMI sensor data"""
     conn = duckdb.connect(DB_PATH)
     
     # Create bronze schema
@@ -535,19 +341,30 @@ def create_bronze_tables() -> None:
     # Load raw data
     train_raw, test_raw = load_data()
     
-    # Apply bronze layer processing pipeline (modern robust functions)
-    train_bronze = encode_categorical_robust(train_raw)
-    test_bronze = encode_categorical_robust(test_raw)
+    print(f"Loaded raw data: train {train_raw.shape}, test {test_raw.shape}")
     
-    train_bronze = advanced_missing_strategy(train_bronze)
-    test_bronze = advanced_missing_strategy(test_bronze)
+    # Apply bronze layer processing pipeline
+    train_bronze = normalize_sensor_data(train_raw)
+    test_bronze = normalize_sensor_data(test_raw)
     
-    train_bronze = winsorize_outliers(train_bronze)
-    test_bronze = winsorize_outliers(test_bronze)
+    train_bronze = handle_tof_missing_values(train_bronze)
+    test_bronze = handle_tof_missing_values(test_bronze)
+    
+    train_bronze = create_participant_groups(train_bronze)
+    test_bronze = create_participant_groups(test_bronze)
+    
+    train_bronze = create_sequence_features(train_bronze)
+    test_bronze = create_sequence_features(test_bronze)
+    
+    train_bronze = advanced_missing_strategy_cmi(train_bronze)
+    test_bronze = advanced_missing_strategy_cmi(test_bronze)
+    
+    train_bronze = winsorize_outliers_cmi(train_bronze)
+    test_bronze = winsorize_outliers_cmi(test_bronze)
     
     # Validate data quality
-    train_validation = validate_data_quality(train_bronze)
-    test_validation = validate_data_quality(test_bronze)
+    train_validation = validate_data_quality_cmi(train_bronze)
+    test_validation = validate_data_quality_cmi(test_bronze)
     
     # Create bronze tables
     conn.execute("DROP TABLE IF EXISTS bronze.train")
@@ -562,58 +379,38 @@ def create_bronze_tables() -> None:
     print("Bronze tables created:")
     print(f"- bronze.train: {len(train_bronze)} rows, {len(train_bronze.columns)} columns")
     print(f"- bronze.test: {len(test_bronze)} rows, {len(test_bronze.columns)} columns")
-    print(f"- Data quality validation: {len([k for k, v in train_validation['type_validation'].items() if v])} types passed")
-    print(f"- Bronze layer features: {len(train_bronze.columns)} columns (quality assured)")
+    print(f"- Unique participants: {train_validation['schema_validation'].get('unique_subjects', 'N/A')}")
+    print(f"- Sensor columns: {train_validation['quality_metrics']['sensor_columns_count']}")
+    print(f"- Missing values (excl. ToF): {train_validation['quality_metrics']['missing_values_excluding_tof']}")
     
     conn.close()
 
 
-def quick_preprocess(df: pd.DataFrame) -> pd.DataFrame:
-    """Legacy preprocessing function - USE create_bronze_tables() for production pipeline"""
-    df = df.copy()
-
-    # 欠損値処理
-    numeric_cols = [
-        "Time_spent_Alone",
-        "Social_event_attendance",
-        "Going_outside",
-        "Friends_circle_size",
-        "Post_frequency",
-    ]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna(df[col].median())
-
-    # カテゴリ変換
-    if "Stage_fear" in df.columns:
-        df["Stage_fear_encoded"] = (df["Stage_fear"] == "Yes").astype(int)
-        # 元のStage_fearを削除してLightGBM互換性を確保
-        df = df.drop(columns=["Stage_fear"])
-    if "Drained_after_socializing" in df.columns:
-        df["Drained_after_socializing_encoded"] = (df["Drained_after_socializing"] == "Yes").astype(int)
-        # 元のDrained_after_socializingを削除してLightGBM互換性を確保
-        df = df.drop(columns=["Drained_after_socializing"])
-
-    return df
-
-
 def load_bronze_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """bronze層データ読み込み"""
+    """Load bronze layer CMI sensor data"""
     conn = duckdb.connect(DB_PATH)
-    train = conn.execute("SELECT * FROM bronze.train").df()
-    test = conn.execute("SELECT * FROM bronze.test").df()
-    conn.close()
+    try:
+        train = conn.execute("SELECT * FROM bronze.train").df()
+        test = conn.execute("SELECT * FROM bronze.test").df()
+    except Exception as e:
+        print(f"Bronze tables not found. Creating them first...")
+        create_bronze_tables()
+        train = conn.execute("SELECT * FROM bronze.train").df()
+        test = conn.execute("SELECT * FROM bronze.test").df()
+    finally:
+        conn.close()
+    
     return train, test
 
 
 # ===== Sklearn-Compatible Transformers for Pipeline Integration =====
 
-class BronzePreprocessor(BaseEstimator, TransformerMixin):
-    """Sklearn-compatible transformer for Bronze layer processing"""
+class CMIBronzePreprocessor(BaseEstimator, TransformerMixin):
+    """Sklearn-compatible transformer for CMI Bronze layer processing"""
     
-    def __init__(self, add_features: bool = True, winsorize: bool = True):
-        self.add_features = add_features
-        self.winsorize = winsorize
+    def __init__(self, normalize_sensors: bool = True, handle_missing: bool = True):
+        self.normalize_sensors = normalize_sensors
+        self.handle_missing = handle_missing
         self.is_fitted = False
     
     def fit(self, X, y=None):
@@ -622,38 +419,55 @@ class BronzePreprocessor(BaseEstimator, TransformerMixin):
         return self
     
     def transform(self, X):
-        """Apply Bronze layer transformations"""
+        """Apply Bronze layer transformations for CMI sensor data"""
         if not self.is_fitted:
             raise ValueError("Transformer must be fitted before transform")
         
-        # Apply Bronze pipeline
-        X_transformed = encode_categorical_robust(X)
-        X_transformed = advanced_missing_strategy(X_transformed)
+        X_transformed = X.copy()
         
-        if self.winsorize:
-            X_transformed = winsorize_outliers(X_transformed)
+        if self.normalize_sensors:
+            X_transformed = normalize_sensor_data(X_transformed)
+        
+        X_transformed = handle_tof_missing_values(X_transformed)
+        X_transformed = create_participant_groups(X_transformed)
+        X_transformed = create_sequence_features(X_transformed)
+        
+        if self.handle_missing:
+            X_transformed = advanced_missing_strategy_cmi(X_transformed)
+        
+        X_transformed = winsorize_outliers_cmi(X_transformed)
         
         return X_transformed
 
 
-class FoldSafeBronzePreprocessor(BaseEstimator, TransformerMixin):
-    """Fold-safe Bronze preprocessor for CV integration"""
+class FoldSafeCMIPreprocessor(BaseEstimator, TransformerMixin):
+    """Fold-safe CMI Bronze preprocessor for CV integration"""
     
     def __init__(self):
-        self.categorical_mappings = {}
+        self.participant_stats = {}
+        self.sensor_stats = {}
         self.is_fitted = False
     
     def fit(self, X, y=None):
-        """Learn categorical mappings from training data only"""
-        self.categorical_mappings = {}
+        """Learn normalization parameters from training data only"""
+        self.participant_stats = {}
+        self.sensor_stats = {}
         
-        categorical_columns = ['Stage_fear', 'Drained_after_socializing']
+        # Learn participant-level statistics
+        if 'subject' in X.columns:
+            imu_cols = SENSOR_COLUMNS['accelerometer'] + SENSOR_COLUMNS['gyroscope']
+            for col in imu_cols:
+                if col in X.columns:
+                    self.participant_stats[col] = X.groupby('subject')[col].agg(['mean', 'std']).to_dict()
         
-        for col in categorical_columns:
+        # Learn global sensor statistics for thermopile
+        thm_cols = SENSOR_COLUMNS['thermopile']
+        for col in thm_cols:
             if col in X.columns:
-                # Learn unique values from training data
-                unique_values = X[col].dropna().unique()
-                self.categorical_mappings[col] = set(unique_values)
+                self.sensor_stats[col] = {
+                    'mean': X[col].mean(),
+                    'std': X[col].std()
+                }
         
         self.is_fitted = True
         return self
@@ -665,35 +479,46 @@ class FoldSafeBronzePreprocessor(BaseEstimator, TransformerMixin):
         
         X_transformed = X.copy()
         
-        # Apply fold-safe categorical encoding
-        categorical_columns = ['Stage_fear', 'Drained_after_socializing']
+        # Apply learned normalization
+        for col, stats in self.participant_stats.items():
+            if col in X_transformed.columns and 'subject' in X_transformed.columns:
+                for subject in X_transformed['subject'].unique():
+                    if subject in stats['mean']:
+                        mask = X_transformed['subject'] == subject
+                        mean_val = stats['mean'][subject]
+                        std_val = stats['std'][subject]
+                        X_transformed.loc[mask, col] = (X_transformed.loc[mask, col] - mean_val) / (std_val + 1e-8)
         
-        for col in categorical_columns:
+        for col, stats in self.sensor_stats.items():
             if col in X_transformed.columns:
-                # Handle NaN values
-                X_transformed[col] = X_transformed[col].fillna('Unknown')
-                
-                # Case-insensitive mapping
-                X_transformed[col] = X_transformed[col].astype(str).str.lower().str.strip()
-                
-                # Apply mapping only for known values
-                yes_values = ['yes', 'y', '1', 'true']
-                no_values = ['no', 'n', '0', 'false']
-                
-                mapping_dict = {}
-                for yes_val in yes_values:
-                    mapping_dict[yes_val] = 1.0
-                for no_val in no_values:
-                    mapping_dict[no_val] = 0.0
-                
-                X_transformed[col] = X_transformed[col].map(mapping_dict)
-                X_transformed[col] = X_transformed[col].astype('float64')
+                X_transformed[col] = (X_transformed[col] - stats['mean']) / (stats['std'] + 1e-8)
         
-        # Add missing flags
-        high_impact_features = ['Stage_fear', 'Going_outside', 'Time_spent_Alone']
-        for col in high_impact_features:
-            if col in X_transformed.columns:
-                missing_flag_col = f"{col}_missing"
-                X_transformed[missing_flag_col] = X_transformed[col].isna().astype('int32')
+        # Apply other transformations
+        X_transformed = handle_tof_missing_values(X_transformed)
+        X_transformed = create_participant_groups(X_transformed)
+        X_transformed = create_sequence_features(X_transformed)
+        X_transformed = advanced_missing_strategy_cmi(X_transformed)
         
         return X_transformed
+
+
+# Legacy function for backward compatibility
+def quick_preprocess(df: pd.DataFrame) -> pd.DataFrame:
+    """Legacy preprocessing function - USE create_bronze_tables() for production pipeline"""
+    # For CMI data, apply basic preprocessing
+    df = df.copy()
+    
+    # Basic sensor normalization
+    df = normalize_sensor_data(df)
+    
+    # Handle ToF missing values
+    df = handle_tof_missing_values(df)
+    
+    # Create participant info
+    df = create_participant_groups(df)
+    
+    return df
+
+
+# Alias for backward compatibility
+validate_data_quality = validate_data_quality_cmi
