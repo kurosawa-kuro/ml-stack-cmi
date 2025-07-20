@@ -33,10 +33,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 def setup_training():
     """Setup training environment"""
-    output_dir = Path(__file__).parent.parent / "outputs" / "models" / "lgb_baseline"
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "models" / "lgb_baseline"
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    log_dir = Path(__file__).parent.parent / "logs"
+    log_dir = Path(__file__).parent.parent.parent / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     
     return output_dir, log_dir
@@ -264,7 +264,10 @@ def generate_test_predictions(models, X_test, output_dir):
         'label': test_pred_labels
     })
     
-    submission_path = output_dir / f"submission_lgb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # Save submission to standardized submissions directory
+    submissions_dir = Path(__file__).parent.parent.parent / "outputs" / "submissions"
+    submissions_dir.mkdir(parents=True, exist_ok=True)
+    submission_path = submissions_dir / f"submission_lgb_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     submission.to_csv(submission_path, index=False)
     
     print(f"  ✓ Submission saved to: {submission_path}")

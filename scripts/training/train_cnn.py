@@ -33,7 +33,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 def setup_cnn_training():
     """Setup CNN training environment"""
-    output_dir = Path(__file__).parent.parent / "outputs" / "models" / "cnn_1d"
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "models" / "cnn_1d"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Configure TensorFlow for mixed precision
@@ -400,7 +400,10 @@ def generate_test_predictions(models, X_test, le, output_dir):
         'label': test_pred_original
     })
     
-    submission_path = output_dir / f"submission_cnn_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    # Save submission to standardized submissions directory
+    submissions_dir = Path(__file__).parent.parent.parent / "outputs" / "submissions"
+    submissions_dir.mkdir(parents=True, exist_ok=True)
+    submission_path = submissions_dir / f"submission_cnn_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     submission.to_csv(submission_path, index=False)
     
     print(f"  ✓ Submission saved to: {submission_path}")

@@ -29,7 +29,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 def setup_analysis():
     """Setup analysis environment"""
-    output_dir = Path(__file__).parent.parent / "outputs" / "reports" / "data_quality"
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "reports" / "data_quality"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 

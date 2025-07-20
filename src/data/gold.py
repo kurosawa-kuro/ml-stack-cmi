@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.feature_selection import SelectKBest, f_classif, mutual_info_classif
 from sklearn.preprocessing import StandardScaler
 
-DB_PATH = "/home/wsl/dev/my-study/ml/solid-ml-stack-s5e7/data/kaggle_datasets.duckdb"
+DB_PATH = "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
 
 
 def clean_and_validate_features(df: pd.DataFrame) -> pd.DataFrame:

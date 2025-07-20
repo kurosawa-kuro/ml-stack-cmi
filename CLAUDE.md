@@ -167,6 +167,63 @@ scripts/                    # Organized executable scripts (see SCRIPT MANAGEMEN
 tests/                      # Comprehensive test suite (73% coverage)
 ```
 
+## 【OUTPUT FOLDER MANAGEMENT】
+
+### Standardized Output Directory Structure
+All project outputs (reports, submissions, models, etc.) should be organized in hierarchical folders at the project root level. This ensures consistent output management and easy tracking of results.
+
+### Output Directory Structure
+```
+outputs/                    # All outputs at project root (git-ignored)
+├── submissions/           # Kaggle submission files
+│   ├── baseline/         # Initial submissions
+│   ├── experiments/      # Experimental submissions
+│   └── final/            # Final competition submissions
+├── reports/              # Analysis and evaluation reports
+│   ├── eda/             # EDA visualizations and reports
+│   ├── model_evaluation/ # Model performance reports
+│   └── feature_analysis/ # Feature importance reports
+├── models/              # Trained model artifacts
+│   ├── lightgbm/        # LightGBM models
+│   ├── deep_learning/   # CNN/RNN models
+│   └── ensemble/        # Ensemble models
+├── figures/             # Plots and visualizations
+│   ├── training/        # Training curves
+│   ├── validation/      # CV results
+│   └── analysis/        # Analysis plots
+└── logs/                # Training and execution logs
+    ├── training/        # Model training logs
+    ├── evaluation/      # Evaluation logs
+    └── errors/          # Error logs for debugging
+```
+
+### Output Management Guidelines
+1. **Fixed Root Location**: All outputs MUST be saved under `outputs/` at project root
+2. **Hierarchical Organization**: Use subdirectories to categorize outputs by type and purpose
+3. **Timestamping**: Include timestamps in filenames for versioning (e.g., `submission_20240115_143022.csv`)
+4. **Descriptive Naming**: Use clear, descriptive names that indicate content and parameters
+5. **Git Ignore**: The entire `outputs/` directory should be in `.gitignore` to avoid version control bloat
+
+### Implementation Examples
+```python
+# Correct: Save to standardized output location
+submission_path = "outputs/submissions/baseline/submission_lgb_cv0.612_20240115.csv"
+report_path = "outputs/reports/eda/sensor_analysis_20240115.html"
+model_path = "outputs/models/lightgbm/lgb_fold3_score0.615.pkl"
+
+# Incorrect: Scattered outputs
+# ❌ "submission.csv"  # Root directory
+# ❌ "scripts/outputs/report.html"  # Script subdirectory
+# ❌ "../results/model.pkl"  # Outside project
+```
+
+### Benefits of Centralized Output Management
+- **Easy Cleanup**: Single `make clean` command can clear all outputs
+- **Better Organization**: Clear separation between code and outputs
+- **Experiment Tracking**: Historical outputs preserved with timestamps
+- **Collaboration**: Team members know exactly where to find results
+- **Backup/Archive**: Easy to backup or archive the entire outputs folder
+
 ## 【SCRIPT MANAGEMENT GUIDELINES】
 
 ### Core Script Set (14 Scripts) - DO NOT ADD UNNECESSARILY

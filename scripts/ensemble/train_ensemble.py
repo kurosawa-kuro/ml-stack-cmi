@@ -35,7 +35,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 def setup_ensemble_training():
     """Setup ensemble training environment"""
-    output_dir = Path(__file__).parent.parent / "outputs" / "models" / "ensemble"
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "models" / "ensemble"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     return output_dir
@@ -44,7 +44,7 @@ def load_base_model_predictions():
     """Load predictions from trained base models"""
     print("📊 Loading base model predictions...")
     
-    models_dir = Path(__file__).parent.parent / "outputs" / "models"
+    models_dir = Path(__file__).parent.parent.parent / "outputs" / "models"
     
     base_predictions = {}
     base_models = {}
@@ -390,9 +390,11 @@ def generate_ensemble_submission(ensemble_pred, optimal_weights, model_names, ou
         'label': ensemble_pred
     })
     
-    # Save submission
+    # Save submission to standardized submissions directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    submission_path = output_dir / f"submission_ensemble_{timestamp}.csv"
+    submissions_dir = Path(__file__).parent.parent.parent / "outputs" / "submissions"
+    submissions_dir.mkdir(parents=True, exist_ok=True)
+    submission_path = submissions_dir / f"submission_ensemble_{timestamp}.csv"
     submission.to_csv(submission_path, index=False)
     
     # Save ensemble configuration

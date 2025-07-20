@@ -34,8 +34,8 @@ def setup_plotting():
     plt.style.use('seaborn-v0_8')
     sns.set_palette("husl")
     
-    # Create output directory
-    output_dir = Path(__file__).parent.parent / "outputs" / "figures" / "eda"
+    # Create output directory - fixed to use project root
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "figures" / "eda"
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 

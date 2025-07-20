@@ -34,7 +34,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 def setup_feature_analysis():
     """Setup feature analysis environment"""
-    output_dir = Path(__file__).parent.parent / "outputs" / "feature_analysis"
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "reports" / "feature_analysis"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     plots_dir = output_dir / "plots"
@@ -46,7 +46,7 @@ def load_trained_models_and_data():
     """Load trained models and feature data"""
     print("📊 Loading trained models and feature data...")
     
-    models_dir = Path(__file__).parent.parent / "outputs" / "models"
+    models_dir = Path(__file__).parent.parent.parent / "outputs" / "models"
     
     # Load LightGBM models
     lgb_models = []

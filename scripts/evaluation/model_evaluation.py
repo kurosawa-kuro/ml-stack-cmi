@@ -37,7 +37,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 def setup_evaluation():
     """Setup evaluation environment"""
-    output_dir = Path(__file__).parent.parent / "outputs" / "evaluation"
+    output_dir = Path(__file__).parent.parent.parent / "outputs" / "reports" / "evaluation"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     plots_dir = output_dir / "plots"
@@ -50,7 +50,7 @@ def load_model_predictions():
     print("📊 Loading model predictions...")
     
     # Look for available model results
-    models_dir = Path(__file__).parent.parent / "outputs" / "models"
+    models_dir = Path(__file__).parent.parent.parent / "outputs" / "models"
     
     available_models = []
     predictions_data = {}
