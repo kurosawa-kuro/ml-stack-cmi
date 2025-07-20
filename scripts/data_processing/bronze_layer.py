@@ -23,7 +23,7 @@ from src.data.bronze import (
 def main():
     """Main bronze layer processing workflow"""
     print("=" * 60)
-    print("CMI BRONZE LAYER DATA PROCESSING")
+    print("CMI SENSOR DATA BRONZE LAYER PROCESSING")
     print("=" * 60)
     
     start_time = time.time()
@@ -41,128 +41,55 @@ def main():
         print("\n2. Validating raw data quality...")
         train_validation = validate_data_quality_cmi(train_raw)
         
-        print(f" Unique participants: {train_validation['schema_validation'].get('unique_subjects', 'N/A')}")
-        print(f" Unique sequences: {train_validation['schema_validation'].get('unique_sequences', 'N/A')}")
-        print(f" Sensor columns: {train_validation['quality_metrics']['sensor_columns_count']}")
+        print(f" Total samples: {train_validation['schema_validation'].get('total_samples', 'N/A')}")
+        print(f" Unique IDs: {train_validation['schema_validation'].get('unique_ids', 'N/A')}")
+        print(f" Numeric features: {train_validation['quality_metrics']['numeric_features_count']}")
+        print(f" Categorical features: {train_validation['quality_metrics']['categorical_features_count']}")
         print(f" Total rows: {train_validation['quality_metrics']['total_rows']:,}")
         
-        # Step 3: Check sensor data structure
-        print("\n3. Analyzing sensor data structure...")
+        # Step 3: Check data structure
+        print("\n3. Analyzing data structure...")
         
-        # Check accelerometer data
+        # Check sensor features
         acc_cols = [col for col in train_raw.columns if col in SENSOR_COLUMNS['accelerometer']]
-        print(f" Accelerometer channels: {len(acc_cols)} ({acc_cols})")
-        
-        # Check gyroscope data  
         gyro_cols = [col for col in train_raw.columns if col in SENSOR_COLUMNS['gyroscope']]
-        print(f" Gyroscope channels: {len(gyro_cols)} ({gyro_cols})")
+        thermal_cols = [col for col in train_raw.columns if col in SENSOR_COLUMNS['thermopile']]
+        tof_cols = [col for col in train_raw.columns if col in SENSOR_COLUMNS['tof_sensors']]
         
-        # Check thermopile data
-        thm_cols = [col for col in train_raw.columns if col in SENSOR_COLUMNS['thermopile']]
-        print(f" Thermopile channels: {len(thm_cols)} ({thm_cols})")
+        print(f" Accelerometer features: {len(acc_cols)} ({acc_cols[:3] if acc_cols else 'None'})")
+        print(f" Gyroscope features: {len(gyro_cols)} ({gyro_cols[:3] if gyro_cols else 'None'})")
+        print(f" Thermopile features: {len(thermal_cols)} ({thermal_cols[:3] if thermal_cols else 'None'})")
+        print(f" ToF sensor features: {len(tof_cols)} ({tof_cols[:3] if tof_cols else 'None'})")
         
-        # Check ToF data
-        tof_cols = [col for col in train_raw.columns if col.startswith('tof_')]
-        print(f" ToF sensor channels: {len(tof_cols)}")
-        
-        # Analyze ToF missing data patterns
-        if tof_cols:
-            tof_missing_rate = (train_raw[tof_cols[:5]] == -1.0).mean().mean()  # Sample first 5 ToF channels
-            print(f" ToF missing rate (sample): {tof_missing_rate:.2%}")
+        # Check metadata
+        metadata_cols = [col for col in train_raw.columns if col in ['subject', 'sequence_id', 'behavior', 'gesture']]
+        print(f" Metadata features: {len(metadata_cols)} ({metadata_cols})")
         
         # Step 4: Create bronze tables
         print("\n4. Creating bronze layer tables...")
         create_bronze_tables()
-        print(" Bronze tables created successfully")
         
-        # Step 5: Validate bronze layer results
-        print("\n5. Validating bronze layer output...")
-        
-        # Import after bronze tables are created
+        # Step 5: Validate bronze data
+        print("\n5. Validating bronze layer data...")
         from src.data.bronze import load_bronze_data
-        
         train_bronze, test_bronze = load_bronze_data()
-        train_bronze_validation = validate_data_quality_cmi(train_bronze)
         
-        print(f" Bronze train shape: {train_bronze.shape}")
-        print(f" Bronze test shape: {test_bronze.shape}")
-        print(f" Features added: {train_bronze.shape[1] - train_raw.shape[1]}")
+        bronze_validation = validate_data_quality_cmi(train_bronze)
+        print(f" Bronze train: {train_bronze.shape}")
+        print(f" Bronze test: {test_bronze.shape}")
+        print(f" Bronze features: {len(train_bronze.columns)}")
         
-        # Check for participant grouping
-        if 'participant_id' in train_bronze.columns:
-            print(f" Participant groups created: {train_bronze['participant_id'].nunique()}")
-        
-        # Check for sequence features
-        sequence_features = [col for col in train_bronze.columns if 'sequence' in col.lower()]
-        if sequence_features:
-            print(f" Sequence features: {len(sequence_features)}")
-        
-        # Check for missing flags
-        missing_flags = [col for col in train_bronze.columns if col.endswith('_missing')]
-        if missing_flags:
-            print(f" Missing value flags: {len(missing_flags)}")
-        
-        # Step 6: Quality assurance summary
-        print("\n6. Quality assurance summary...")
-        
-        # Data type validation
-        sensor_type_validation = sum(train_bronze_validation['type_validation'].values())
-        total_sensors = len(train_bronze_validation['type_validation'])
-        
-        if total_sensors > 0:
-            print(f" Sensor type validation: {sensor_type_validation}/{total_sensors} passed")
-        
-        # Range validation
-        range_validations = []
-        for sensor_results in train_bronze_validation['range_validation'].values():
-            if isinstance(sensor_results, dict):
-                range_validations.extend(sensor_results.values())
-        
-        if range_validations:
-            passed_range = sum(range_validations)
-            print(f" Range validation: {passed_range}/{len(range_validations)} passed")
-        
-        # Memory usage
-        memory_mb = train_bronze.memory_usage(deep=True).sum() / 1024 / 1024
-        print(f" Memory usage: {memory_mb:.1f} MB")
-        
-        # Processing time
+        # Step 6: Summary
         elapsed_time = time.time() - start_time
-        print(f" Processing time: {elapsed_time:.1f} seconds")
-        
-        print("\n" + "=" * 60)
-        print("BRONZE LAYER PROCESSING COMPLETED SUCCESSFULLY")
-        print("=" * 60)
-        
-        # Return success summary
-        return {
-            'status': 'success',
-            'train_shape': train_bronze.shape,
-            'test_shape': test_bronze.shape,
-            'participants': train_bronze_validation['schema_validation'].get('unique_subjects', 0),
-            'features_added': train_bronze.shape[1] - train_raw.shape[1],
-            'processing_time': elapsed_time
-        }
+        print(f"\n✅ Bronze layer processing completed in {elapsed_time:.2f} seconds")
+        print(f" Processed {len(train_raw):,} training samples")
+        print(f" Processed {len(test_raw):,} test samples")
+        print(f" Generated {len(train_bronze.columns)} features")
         
     except Exception as e:
-        print(f"\nL Error in bronze layer processing: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
-        return {
-            'status': 'error',
-            'error': str(e),
-            'processing_time': time.time() - start_time
-        }
+        print(f"\n❌ Error in bronze layer processing: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    result = main()
-    
-    # Exit with appropriate code
-    if result['status'] == 'success':
-        print(f"\n Bronze layer processing completed in {result['processing_time']:.1f}s")
-        sys.exit(0)
-    else:
-        print(f"\nL Bronze layer processing failed: {result['error']}")
-        sys.exit(1)
+    main()

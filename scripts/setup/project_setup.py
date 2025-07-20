@@ -122,13 +122,13 @@ def test_data_connection():
         
         # Try basic data loading (just headers)
         try:
-            train_df, test_df = load_data(nrows=5)  # Just load 5 rows for testing
+            train_df, test_df = load_data()
             print(f"  ✓ Data loading test successful")
             print(f"    - Train shape: {train_df.shape}")
             print(f"    - Test shape: {test_df.shape}")
             
-            # Check expected columns
-            expected_cols = ['acc_x', 'acc_y', 'acc_z', 'gyro_x', 'gyro_y', 'gyro_z']
+            # Check expected columns for CMI sensor data
+            expected_cols = ['acc_x', 'acc_y', 'acc_z', 'subject', 'behavior']
             missing_cols = [col for col in expected_cols if col not in train_df.columns]
             if missing_cols:
                 print(f"  ⚠️  Missing expected columns: {missing_cols}")

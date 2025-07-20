@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Gold Layer Processing Script for CMI Sensor Data
-ML-Ready Data Preparation with GroupKFold Support
+Gold Layer Processing Script for Personality Data
+ML-Ready Data Preparation with Cross-Validation Support
 
-CLAUDE.md: Gold layer script for creating ML-ready datasets with participant-based CV
+CLAUDE.md: Gold layer script for creating ML-ready datasets with proper CV
 """
 
 import sys
@@ -39,11 +39,11 @@ def create_output_directories():
     
     for dir_path in output_dirs:
         os.makedirs(dir_path, exist_ok=True)
-        print(f"=Á Created directory: {dir_path}")
+        print(f"= Created directory: {dir_path}")
 
 
 def generate_gold_analysis_report(train_df, test_df):
-    """Generate comprehensive Gold layer analysis report"""
+    """Generate comprehensive Gold layer analysis report for personality data"""
     import pandas as pd
     import matplotlib.pyplot as plt
     import seaborn as sns
@@ -55,13 +55,13 @@ def generate_gold_analysis_report(train_df, test_df):
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
     
     # 1. Feature count analysis
-    sensor_features = len([col for col in train_df.columns if any(pattern in col for pattern in ['imu_', 'thermal_', 'tof_', 'movement_', 'proximity_'])])
-    tsfresh_features = len([col for col in train_df.columns if col.startswith('tsfresh_')])
-    freq_features = len([col for col in train_df.columns if 'spectral_' in col or 'dominant_freq' in col])
-    other_features = len(train_df.columns) - sensor_features - tsfresh_features - freq_features - 5  # Minus metadata columns
+    personality_features = len([col for col in train_df.columns if any(pattern in col for pattern in ['ratio', 'efficiency', 'intensity', 'interaction'])])
+    statistical_features = len([col for col in train_df.columns if any(pattern in col for pattern in ['mean', 'std', 'poly_'])])
+    encoded_features = len([col for col in train_df.columns if col.endswith('_encoded')])
+    other_features = len(train_df.columns) - personality_features - statistical_features - encoded_features - 2  # Minus metadata columns
     
-    feature_counts = [sensor_features, tsfresh_features, freq_features, other_features]
-    feature_labels = ['Sensor', 'tsfresh', 'Frequency', 'Other']
+    feature_counts = [personality_features, statistical_features, encoded_features, other_features]
+    feature_labels = ['Personality', 'Statistical', 'Encoded', 'Other']
     
     axes[0, 0].pie(feature_counts, labels=feature_labels, autopct='%1.1f%%', startangle=90)
     axes[0, 0].set_title('Feature Composition')
@@ -74,25 +74,24 @@ def generate_gold_analysis_report(train_df, test_df):
     axes[0, 1].set_title('Dataset Sizes')
     axes[0, 1].set_ylabel('Number of Samples')
     
-    # 3. Participant distribution
-    if 'participant_id' in train_df.columns:
-        participant_counts = train_df['participant_id'].value_counts()
-        axes[1, 0].hist(participant_counts.values, bins=20, alpha=0.7)
-        axes[1, 0].set_title('Samples per Participant Distribution')
-        axes[1, 0].set_xlabel('Samples per Participant')
-        axes[1, 0].set_ylabel('Frequency')
-    
-    # 4. Target distribution
-    target_cols = [col for col in train_df.columns if 'label' in col and not col.endswith('_binary')]
+    # 3. Target distribution
+    target_cols = [col for col in train_df.columns if 'Personality' in col and not col.endswith('_encoded')]
     if target_cols:
         target_col = target_cols[0]
         target_dist = train_df[target_col].value_counts()
-        axes[1, 1].bar(range(len(target_dist)), target_dist.values)
-        axes[1, 1].set_title(f'Target Distribution ({target_col})')
-        axes[1, 1].set_xlabel('Target Classes')
-        axes[1, 1].set_ylabel('Count')
-        axes[1, 1].set_xticks(range(len(target_dist)))
-        axes[1, 1].set_xticklabels(target_dist.index, rotation=45)
+        axes[1, 0].bar(range(len(target_dist)), target_dist.values)
+        axes[1, 0].set_title(f'Target Distribution ({target_col})')
+        axes[1, 0].set_xlabel('Target Classes')
+        axes[1, 0].set_ylabel('Count')
+        axes[1, 0].set_xticks(range(len(target_dist)))
+        axes[1, 0].set_xticklabels(target_dist.index, rotation=45)
+    
+    # 4. Feature correlation heatmap (sample)
+    numeric_cols = train_df.select_dtypes(include=['float64', 'float32', 'int64', 'int32']).columns[:10]
+    if len(numeric_cols) > 1:
+        correlation_matrix = train_df[numeric_cols].corr()
+        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, ax=axes[1, 1])
+        axes[1, 1].set_title('Feature Correlation (Top 10)')
     
     plt.tight_layout()
     plt.savefig(f"outputs/figures/gold_analysis/gold_layer_analysis_{timestamp}.png", dpi=300, bbox_inches='tight')
@@ -103,7 +102,7 @@ def generate_gold_analysis_report(train_df, test_df):
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Gold Layer Analysis Report</title>
+        <title>Gold Layer Analysis Report - Personality Data</title>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 40px; }}
             .header {{ background-color: #f0f0f0; padding: 20px; border-radius: 5px; }}
@@ -116,13 +115,13 @@ def generate_gold_analysis_report(train_df, test_df):
     </head>
     <body>
         <div class="header">
-            <h1>>G Gold Layer Analysis Report</h1>
+            <h1>>G Gold Layer Analysis Report - Personality Data</h1>
             <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p>CMI Sensor Data - ML-Ready Dataset Analysis</p>
+            <p>Personality Classification - ML-Ready Dataset Analysis</p>
         </div>
         
         <div class="section">
-            <h2>=Ê Dataset Overview</h2>
+            <h2>= Dataset Overview</h2>
             <div class="metric">
                 <strong>Training Samples:</strong> {len(train_df):,}
             </div>
@@ -133,27 +132,27 @@ def generate_gold_analysis_report(train_df, test_df):
                 <strong>Total Features:</strong> {len(train_df.columns)}
             </div>
             <div class="metric">
-                <strong>Participants:</strong> {train_df['participant_id'].nunique() if 'participant_id' in train_df.columns else 'Unknown'}
+                <strong>Unique IDs:</strong> {train_df['id'].nunique() if 'id' in train_df.columns else 'Unknown'}
             </div>
         </div>
         
         <div class="section">
-            <h2>> Feature Composition</h2>
+            <h2>> Feature Composition</h2>
             <table>
                 <tr><th>Feature Type</th><th>Count</th><th>Percentage</th></tr>
-                <tr><td>Sensor Features</td><td>{sensor_features}</td><td>{sensor_features/len(train_df.columns)*100:.1f}%</td></tr>
-                <tr><td>tsfresh Features</td><td>{tsfresh_features}</td><td>{tsfresh_features/len(train_df.columns)*100:.1f}%</td></tr>
-                <tr><td>Frequency Features</td><td>{freq_features}</td><td>{freq_features/len(train_df.columns)*100:.1f}%</td></tr>
+                <tr><td>Personality Features</td><td>{personality_features}</td><td>{personality_features/len(train_df.columns)*100:.1f}%</td></tr>
+                <tr><td>Statistical Features</td><td>{statistical_features}</td><td>{statistical_features/len(train_df.columns)*100:.1f}%</td></tr>
+                <tr><td>Encoded Features</td><td>{encoded_features}</td><td>{encoded_features/len(train_df.columns)*100:.1f}%</td></tr>
                 <tr><td>Other Features</td><td>{other_features}</td><td>{other_features/len(train_df.columns)*100:.1f}%</td></tr>
             </table>
         </div>
         
         <div class="section">
-            <h2><¯ Target Analysis</h2>
+            <h2>< Target Analysis</h2>
     """
     
     # Add target distribution if available
-    target_cols = [col for col in train_df.columns if 'label' in col and not col.endswith('_binary')]
+    target_cols = [col for col in train_df.columns if 'Personality' in col and not col.endswith('_encoded')]
     if target_cols:
         target_col = target_cols[0]
         target_dist = train_df[target_col].value_counts()
@@ -170,7 +169,7 @@ def generate_gold_analysis_report(train_df, test_df):
         </div>
         
         <div class="section">
-            <h2>=È Data Quality Metrics</h2>
+            <h2>= Data Quality Metrics</h2>
             <div class="metric">
                 <strong>Missing Values:</strong> {train_df.isnull().sum().sum():,}
             </div>
@@ -183,25 +182,25 @@ def generate_gold_analysis_report(train_df, test_df):
         </div>
         
         <div class="section">
-            <h2>= GroupKFold CV Readiness</h2>
-            <p> participant_id column: {'Present' if 'participant_id' in train_df.columns else 'Missing'}</p>
-            <p> Target encoding: {'Complete' if any('encoded' in col for col in train_df.columns) else 'Pending'}</p>
-            <p> Numeric features: {len([col for col in train_df.columns if train_df[col].dtype in ['int64', 'float64']])}</p>
+            <h2>= Cross-Validation Readiness</h2>
+            <p> ID column: {'Present' if 'id' in train_df.columns else 'Missing'}</p>
+            <p> Target encoding: {'Complete' if any('encoded' in col for col in train_df.columns) else 'Pending'}</p>
+            <p> Numeric features: {len([col for col in train_df.columns if train_df[col].dtype in ['int64', 'float64']])}</p>
         </div>
         
         <div class="section">
-            <h2>=¡ Next Steps</h2>
+            <h2>= Next Steps</h2>
             <ul>
                 <li>Use <code>load_gold_data()</code> to load the datasets</li>
                 <li>Use <code>get_ml_ready_sequences()</code> to prepare for model training</li>
-                <li>Use <code>setup_groupkfold_cv()</code> for participant-based cross-validation</li>
-                <li>Train LightGBM or CNN models with the prepared data</li>
+                <li>Train LightGBM or other models with the prepared data</li>
+                <li>Evaluate model performance with cross-validation</li>
             </ul>
         </div>
         
         <div class="section">
             <p><em>Report generated by Gold Layer Processing Script</em></p>
-            <p><em>CLAUDE.md: CMI Sensor Data Pipeline</em></p>
+            <p><em>CLAUDE.md: Personality Data Pipeline</em></p>
         </div>
     </body>
     </html>
@@ -210,13 +209,13 @@ def generate_gold_analysis_report(train_df, test_df):
     with open(report_path, 'w') as f:
         f.write(html_content)
     
-    print(f"=Ä Analysis report saved: {report_path}")
+    print(f"= Analysis report saved: {report_path}")
     return report_path
 
 
 def main():
     """Main execution function for Gold layer processing"""
-    parser = argparse.ArgumentParser(description="Gold Layer Processing for CMI Sensor Data")
+    parser = argparse.ArgumentParser(description="Gold Layer Processing for Personality Data")
     parser.add_argument("--create-tables", action="store_true", help="Create Gold layer tables")
     parser.add_argument("--analyze", action="store_true", help="Generate analysis report")
     parser.add_argument("--test-cv", action="store_true", help="Test GroupKFold CV setup")
@@ -231,7 +230,7 @@ def main():
     if not any([args.create_tables, args.analyze, args.test_cv, args.create_windows]):
         args.all = True
     
-    print(">G Starting Gold Layer Processing for CMI Sensor Data")
+    print(">G Starting Gold Layer Processing for Personality Data")
     print("=" * 60)
     
     # Initialize time tracker
@@ -244,7 +243,7 @@ def main():
     try:
         # Step 1: Create Gold tables
         if args.create_tables or args.all:
-            print("\n=Ê Step 1: Creating Gold layer tables...")
+            print("\n=ï¿½ Step 1: Creating Gold layer tables...")
             tracker.start("create_tables")
             create_gold_tables()
             tracker.end("create_tables")
@@ -252,13 +251,13 @@ def main():
         
         # Step 2: Load and analyze data
         if args.analyze or args.all:
-            print("\n=È Step 2: Loading Gold data for analysis...")
+            print("\n=ï¿½ Step 2: Loading Gold data for analysis...")
             tracker.start("load_data")
             train_df, test_df = load_gold_data()
             tracker.end("load_data")
             print(f" Data loaded in {tracker.get_elapsed('load_data'):.2f}s")
             
-            print("\n=Ä Generating comprehensive analysis report...")
+            print("\n=ï¿½ Generating comprehensive analysis report...")
             tracker.start("analysis")
             report_path = generate_gold_analysis_report(train_df, test_df)
             tracker.end("analysis")
@@ -266,7 +265,7 @@ def main():
         
         # Step 3: Test GroupKFold CV
         if args.test_cv or args.all:
-            print("\n= Step 3: Testing GroupKFold CV setup...")
+            print("\n= Step 3: Testing GroupKFold CV setup...")
             tracker.start("test_cv")
             
             if 'train_df' not in locals():
@@ -300,11 +299,11 @@ def main():
                 f.write(f"\n No participant leakage detected across all folds\n")
                 f.write(f" Data ready for GroupKFold training\n")
             
-            print(f"=Ä CV validation report: {cv_report_path}")
+            print(f"=ï¿½ CV validation report: {cv_report_path}")
         
         # Step 4: Create sequence windows
         if args.create_windows or args.all:
-            print(f"\n>Ÿ Step 4: Creating sequence windows (size={args.window_size}, overlap={args.overlap})...")
+            print(f"\n>ï¿½ Step 4: Creating sequence windows (size={args.window_size}, overlap={args.overlap})...")
             tracker.start("create_windows")
             
             if 'train_df' not in locals():
@@ -323,17 +322,17 @@ def main():
             
             tracker.end("create_windows")
             print(f" Sequence windows created in {tracker.get_elapsed('create_windows'):.2f}s")
-            print(f"=¾ Windowed data saved: {window_path}")
+            print(f"=ï¿½ Windowed data saved: {window_path}")
         
         # Final summary
         tracker.end("gold_layer_processing")
         total_time = tracker.get_elapsed("gold_layer_processing")
         
         print("\n" + "=" * 60)
-        print("<‰ Gold Layer Processing Complete!")
-        print(f"ñ  Total processing time: {total_time:.2f} seconds")
-        print(f"=Ê Gold layer ready for ML training with GroupKFold CV")
-        print(f"=¡ Next: Run `make train-lgb` or `make train-cnn` for model training")
+        print("<ï¿½ Gold Layer Processing Complete!")
+        print(f"ï¿½  Total processing time: {total_time:.2f} seconds")
+        print(f"=ï¿½ Gold layer ready for ML training with GroupKFold CV")
+        print(f"=ï¿½ Next: Run `make train-lgb` or `make train-cnn` for model training")
         
         # Send completion notification
         notify_completion(

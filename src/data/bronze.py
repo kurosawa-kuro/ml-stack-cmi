@@ -55,35 +55,22 @@ def load_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def _set_optimal_dtypes_cmi(df: pd.DataFrame) -> pd.DataFrame:
-    """Set optimal dtypes for CMI sensor data LightGBM compatibility and performance"""
+    """Set optimal dtypes for sensor data LightGBM compatibility and performance"""
     df = df.copy()
     
-    # Sensor data - use float32 for memory efficiency
-    all_sensor_cols = (
-        SENSOR_COLUMNS['accelerometer'] + 
-        SENSOR_COLUMNS['gyroscope'] + 
-        SENSOR_COLUMNS['thermopile'] + 
-        SENSOR_COLUMNS['tof_sensors']
-    )
-    
-    for col in all_sensor_cols:
+    # Numeric features - use float32 for memory efficiency
+    numeric_cols = [col for col in df.columns if col in SENSOR_COLUMNS['accelerometer'] + SENSOR_COLUMNS['gyroscope'] + SENSOR_COLUMNS['thermopile']]
+    for col in numeric_cols:
         if col in df.columns:
-            # Convert sensor data to float32 for memory efficiency
             df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
     
-    # Sequence counter as int32
-    if 'sequence_counter' in df.columns:
-        df['sequence_counter'] = df['sequence_counter'].astype('int32')
+    # ID column as int32
+    if 'row_id' in df.columns:
+        df['row_id'] = df['row_id'].astype('int32')
     
     # Categorical features - ensure object type for processing
-    categorical_cols = ['sequence_type', 'subject', 'orientation', 'behavior', 'phase', 'gesture']
+    categorical_cols = [col for col in df.columns if col in METADATA_COLUMNS]
     for col in categorical_cols:
-        if col in df.columns:
-            df[col] = df[col].astype('object')
-    
-    # String IDs
-    id_cols = ['row_id', 'sequence_id']
-    for col in id_cols:
         if col in df.columns:
             df[col] = df[col].astype('object')
     
@@ -91,176 +78,178 @@ def _set_optimal_dtypes_cmi(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def validate_data_quality_cmi(df: pd.DataFrame) -> Dict[str, Any]:
-    """Type validation and range guards for CMI sensor data quality assurance"""
+    """Type validation and range guards for sensor data quality assurance"""
     validation_results = {
         'type_validation': {},
         'range_validation': {},
         'schema_validation': {},
         'quality_metrics': {},
-        'sensor_validation': {}
+        'feature_validation': {}
     }
     
-    # Type validation for sensor data
-    all_sensor_cols = (
-        SENSOR_COLUMNS['accelerometer'] + 
-        SENSOR_COLUMNS['gyroscope'] + 
-        SENSOR_COLUMNS['thermopile']
-    )
-    
-    for col in all_sensor_cols:
+    # Type validation for numeric features
+    numeric_cols = [col for col in df.columns if col in SENSOR_COLUMNS['accelerometer'] + SENSOR_COLUMNS['gyroscope'] + SENSOR_COLUMNS['thermopile']]
+    for col in numeric_cols:
         if col in df.columns:
             validation_results['type_validation'][col] = pd.api.types.is_numeric_dtype(df[col])
     
     # Categorical type validation
-    for col in ['sequence_type', 'subject', 'orientation', 'behavior', 'phase', 'gesture']:
+    categorical_cols = [col for col in df.columns if col in METADATA_COLUMNS]
+    for col in categorical_cols:
         if col in df.columns:
             validation_results['type_validation'][col] = df[col].dtype == 'object'
     
-    # Range validation for sensor data
-    if 'acc_x' in df.columns:
-        acc_cols = SENSOR_COLUMNS['accelerometer']
-        for col in acc_cols:
-            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+    # Range validation for numeric features
+    for col in numeric_cols:
+        if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
+            if col in SENSOR_COLUMNS['accelerometer']:
                 validation_results['range_validation'][col] = {
-                    'reasonable_range': (df[col].abs() <= 50).all(),  # Reasonable accelerometer range
+                    'reasonable_range': ((df[col] >= -10).all() & (df[col] <= 10).all()), # Accelerometer range
+                    'finite_values': np.isfinite(df[col]).all()
+                }
+            elif col in SENSOR_COLUMNS['gyroscope']:
+                validation_results['range_validation'][col] = {
+                    'reasonable_range': ((df[col] >= -10).all() & (df[col] <= 10).all()), # Gyroscope range
+                    'finite_values': np.isfinite(df[col]).all()
+                }
+            elif col in SENSOR_COLUMNS['thermopile']:
+                validation_results['range_validation'][col] = {
+                    'reasonable_range': ((df[col] >= 0).all() & (df[col] <= 100).all()), # Thermopile range
                     'finite_values': np.isfinite(df[col]).all()
                 }
     
-    # Thermopile validation
-    if 'thm_1' in df.columns:
-        thm_cols = SENSOR_COLUMNS['thermopile']
-        for col in thm_cols:
-            if col in df.columns and pd.api.types.is_numeric_dtype(df[col]):
-                validation_results['range_validation'][col] = {
-                    'reasonable_temp_range': ((df[col] >= 0) & (df[col] <= 100)).all(),  # Reasonable temp range
-                    'finite_values': np.isfinite(df[col]).all()
-                }
+    # Categorical value validation
+    if 'behavior' in df.columns:
+        validation_results['feature_validation']['behavior_values'] = df['behavior'].value_counts().to_dict()
     
-    # ToF sensor validation (many will have -1.0 for missing values)
-    tof_cols = [col for col in df.columns if col.startswith('tof_')]
-    if tof_cols:
-        validation_results['sensor_validation']['tof_missing_rate'] = {
-            col: (df[col] == -1.0).mean() for col in tof_cols[:10]  # Sample first 10
-        }
+    if 'phase' in df.columns:
+        validation_results['feature_validation']['phase_values'] = df['phase'].value_counts().to_dict()
     
-    # Participant and sequence validation
-    if 'subject' in df.columns:
-        validation_results['schema_validation']['unique_subjects'] = df['subject'].nunique()
-        validation_results['schema_validation']['subject_sample_sizes'] = df['subject'].value_counts().describe().to_dict()
+    if 'gesture' in df.columns:
+        validation_results['feature_validation']['gesture_values'] = df['gesture'].value_counts().to_dict()
     
-    if 'sequence_id' in df.columns:
-        validation_results['schema_validation']['unique_sequences'] = df['sequence_id'].nunique()
+    # Schema validation
+    validation_results['schema_validation']['total_samples'] = len(df)
+    validation_results['schema_validation']['unique_ids'] = df['row_id'].nunique() if 'row_id' in df.columns else 0
     
     # Quality metrics
     validation_results['quality_metrics'] = {
         'total_rows': len(df),
         'total_columns': len(df.columns),
-        'missing_values_excluding_tof': df.drop(columns=tof_cols, errors='ignore').isnull().sum().sum(),
-        'tof_missing_values': df[tof_cols].isnull().sum().sum() if tof_cols else 0,
+        'missing_values': df.isnull().sum().sum(),
         'duplicate_rows': df.duplicated().sum(),
-        'sensor_columns_count': len([col for col in df.columns if any(col.startswith(prefix) for prefix in ['acc_', 'rot_', 'thm_', 'tof_'])])
+        'numeric_features_count': len([col for col in df.columns if col in numeric_cols]),
+        'categorical_features_count': len([col for col in df.columns if col in categorical_cols])
     }
     
     return validation_results
 
 
 def normalize_sensor_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize sensor data for CMI dataset - Z-score normalization per sensor type"""
+    """Normalize sensor data for CMI competition"""
     df = df.copy()
     
-    # IMU normalization (per-participant to handle individual differences)
+    # Sensor-specific normalization
+    # IMU sensors (accelerometer, gyroscope)
     imu_cols = SENSOR_COLUMNS['accelerometer'] + SENSOR_COLUMNS['gyroscope']
-    
     for col in imu_cols:
         if col in df.columns:
-            # Group by participant for normalization to prevent leakage
-            if 'subject' in df.columns:
-                # Per-participant normalization
-                df[col] = df.groupby('subject')[col].transform(
-                    lambda x: (x - x.mean()) / (x.std() + 1e-8)
-                )
-            else:
-                # Global normalization if no participant info
-                df[col] = (df[col] - df[col].mean()) / (df[col].std() + 1e-8)
+            # Z-score normalization per sensor channel
+            mean_val = df[col].mean()
+            std_val = df[col].std()
+            if std_val > 0:
+                df[col] = (df[col] - mean_val) / std_val
     
-    # Thermopile normalization (temperature sensors)
-    thm_cols = SENSOR_COLUMNS['thermopile']
-    for col in thm_cols:
+    # Thermopile sensors - temperature normalization
+    thermal_cols = SENSOR_COLUMNS['thermopile']
+    for col in thermal_cols:
         if col in df.columns:
-            # Global normalization for temperature (less individual variation expected)
-            df[col] = (df[col] - df[col].mean()) / (df[col].std() + 1e-8)
+            # Normalize to 0-1 range based on typical temperature range
+            df[col] = (df[col] - df[col].min()) / (df[col].max() - df[col].min() + 1e-8)
+    
+    return df
+
+
+def handle_categorical_missing_values(df: pd.DataFrame) -> pd.DataFrame:
+    """Handle missing values in categorical features for CMI data"""
+    df = df.copy()
+    
+    # Categorical features
+    categorical_cols = [col for col in df.columns if col in METADATA_COLUMNS]
+    
+    for col in categorical_cols:
+        if col in df.columns and df[col].isnull().any():
+            # Fill with most frequent value
+            most_frequent = df[col].mode().iloc[0] if not df[col].mode().empty else 'Unknown'
+            df[col] = df[col].fillna(most_frequent)
     
     return df
 
 
 def handle_tof_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """Handle ToF sensor missing values (-1.0 indicates no detection)"""
+    """Handle missing values in ToF sensor data"""
     df = df.copy()
     
-    # Get ToF columns
-    tof_cols = [col for col in df.columns if col.startswith('tof_')]
+    # ToF sensors often have missing values due to measurement issues
+    tof_cols = SENSOR_COLUMNS['tof_sensors']
     
-    if tof_cols:
-        # Create all missing flags at once to avoid DataFrame fragmentation
-        missing_flags_data = {}
-        
-        for col in tof_cols:
-            missing_flag_col = f"{col}_missing"
-            missing_flags_data[missing_flag_col] = (df[col] == -1.0).astype('int8')
-            
-            # Replace -1.0 with NaN for proper handling
-            df[col] = df[col].replace(-1.0, np.nan)
-        
-        # Add all missing flags at once using pd.concat for better performance
-        missing_flags_df = pd.DataFrame(missing_flags_data, index=df.index)
-        df = pd.concat([df, missing_flags_df], axis=1)
+    for col in tof_cols:
+        if col in df.columns and df[col].isnull().any():
+            # Fill with median value (typical distance)
+            median_val = df[col].median()
+            df[col] = df[col].fillna(median_val)
+    
+    return df
+
+
+def create_sensor_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Create sensor-specific features for CMI data"""
+    df = df.copy()
+    
+    # IMU motion intensity
+    acc_cols = SENSOR_COLUMNS['accelerometer']
+    if all(col in df.columns for col in acc_cols):
+        df['imu_total_motion'] = np.sqrt(df[acc_cols[0]]**2 + df[acc_cols[1]]**2 + df[acc_cols[2]]**2)
+    
+    # Thermal distance interaction
+    thermal_cols = SENSOR_COLUMNS['thermopile']
+    if len(thermal_cols) >= 2:
+        df['thermal_distance_interaction'] = df[thermal_cols[0]] - df[thermal_cols[1]]
+    
+    # Movement intensity from gyroscope
+    gyro_cols = SENSOR_COLUMNS['gyroscope']
+    if all(col in df.columns for col in gyro_cols[:3]):  # rot_x, rot_y, rot_z
+        df['movement_intensity'] = np.sqrt(df[gyro_cols[0]]**2 + df[gyro_cols[1]]**2 + df[gyro_cols[2]]**2)
     
     return df
 
 
 def create_participant_groups(df: pd.DataFrame) -> pd.DataFrame:
-    """Create participant grouping information for GroupKFold CV"""
+    """Create participant groups for GroupKFold CV"""
     df = df.copy()
     
+    # Use subject column as participant_id for GroupKFold
     if 'subject' in df.columns:
-        # Create numeric participant IDs for GroupKFold
-        unique_subjects = df['subject'].unique()
-        subject_to_id = {subject: idx for idx, subject in enumerate(unique_subjects)}
-        df['participant_id'] = df['subject'].map(subject_to_id)
-        
-        # Add participant statistics
-        participant_stats = df.groupby('subject').agg({
-            'sequence_id': 'nunique',
-            'sequence_counter': 'count'
-        }).rename(columns={
-            'sequence_id': 'sequences_per_participant',
-            'sequence_counter': 'samples_per_participant'
-        })
-        
-        df = df.merge(participant_stats, left_on='subject', right_index=True, how='left')
+        df['participant_id'] = df['subject']
+    else:
+        # If no subject column, create groups based on sequence_id
+        df['participant_id'] = df['sequence_id'] if 'sequence_id' in df.columns else df.index // 1000
     
     return df
 
 
 def create_sequence_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Create sequence-level features for time-series analysis"""
+    """Create sequence-based features for time-series data"""
     df = df.copy()
     
-    if 'sequence_id' in df.columns and 'sequence_counter' in df.columns:
-        # Sequence position features
-        df['sequence_position'] = df['sequence_counter']
+    # Sequence-based features
+    if 'sequence_id' in df.columns:
+        # Sequence length
+        sequence_lengths = df.groupby('sequence_id').size()
+        df['sequence_length'] = df['sequence_id'].map(sequence_lengths)
         
-        # Sequence length (samples per sequence)
-        seq_lengths = df.groupby('sequence_id')['sequence_counter'].max() + 1
-        df = df.merge(seq_lengths.rename('sequence_length'), left_on='sequence_id', right_index=True, how='left')
-        
-        # Relative position in sequence
-        df['sequence_progress'] = df['sequence_counter'] / df['sequence_length']
-        
-        # Sequence statistics for each participant
-        if 'subject' in df.columns:
-            participant_seq_stats = df.groupby('subject')['sequence_length'].agg(['mean', 'std', 'count']).add_prefix('participant_seq_')
-            df = df.merge(participant_seq_stats, left_on='subject', right_index=True, how='left')
+        # Sequence position
+        df['sequence_position'] = df.groupby('sequence_id').cumcount()
     
     return df
 
@@ -350,6 +339,9 @@ def create_bronze_tables() -> None:
     train_bronze = handle_tof_missing_values(train_bronze)
     test_bronze = handle_tof_missing_values(test_bronze)
     
+    train_bronze = create_sensor_features(train_bronze)
+    test_bronze = create_sensor_features(test_bronze)
+    
     train_bronze = create_participant_groups(train_bronze)
     test_bronze = create_participant_groups(test_bronze)
     
@@ -429,6 +421,7 @@ class CMIBronzePreprocessor(BaseEstimator, TransformerMixin):
             X_transformed = normalize_sensor_data(X_transformed)
         
         X_transformed = handle_tof_missing_values(X_transformed)
+        X_transformed = create_sensor_features(X_transformed)
         X_transformed = create_participant_groups(X_transformed)
         X_transformed = create_sequence_features(X_transformed)
         
@@ -495,6 +488,7 @@ class FoldSafeCMIPreprocessor(BaseEstimator, TransformerMixin):
         
         # Apply other transformations
         X_transformed = handle_tof_missing_values(X_transformed)
+        X_transformed = create_sensor_features(X_transformed)
         X_transformed = create_participant_groups(X_transformed)
         X_transformed = create_sequence_features(X_transformed)
         X_transformed = advanced_missing_strategy_cmi(X_transformed)
