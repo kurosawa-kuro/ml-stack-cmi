@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kaggle-ml-stack"
+version = "0.1.0"
+description = "Kaggle ML Stack - Specialized machine learning pipeline for Kaggle competitions"
+authors = [
+    {name = "Kaggle ML Team", email = "team@kaggle-ml.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas>=1.5.0",
+    "numpy>=1.21.0",
+    "scikit-learn>=1.1.0",
+    "xgboost>=1.6.0",
+    "catboost>=1.1.0",
+    "lightgbm>=3.3.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+    "joblib>=1.2.0",
+    "tqdm>=4.64.0",
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=5.0.0",
+    "mypy>=0.991",
+    "duckdb>=0.9.0",
+    "category-encoders>=2.5.0",
+    "imbalanced-learn>=0.10.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "flake8>=5.0.0",
+    "mypy>=0.991",
+    "pre-commit>=2.20.0"
+]
+optimization = [
+    "optuna>=3.0.0",
+    "scikit-optimize>=0.9.0",
+    "hyperopt>=0.2.7"
+]
+visualization = [
+    "plotly>=5.0.0",
+    "shap>=0.40.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["modeling*", "preprocessing*", "features*", "optimization*", "evaluation*", "submission*", "utils*"]
+
+[tool.black]
+line-length = 120
+target-version = ['py39']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = false
+warn_unused_configs = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+disallow_untyped_decorators = false
+no_implicit_optional = false
+warn_redundant_casts = false
+warn_unused_ignores = false
+warn_no_return = false
+warn_unreachable = false
+strict_equality = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+pythonpath = ["src", "config"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "-v"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests"
+]
+filterwarnings = [
+    "ignore::UserWarning",
+    "ignore::FutureWarning",
+    "ignore::DeprecationWarning"
+]

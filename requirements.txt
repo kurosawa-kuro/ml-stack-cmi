@@ -1,0 +1,15 @@
+# --- ML / データ基盤 ---
+mlflow
+polars[all]
+lightgbm
+catboost
+xgboost
+optuna[lightgbm]
+duckdb
+scikit-learn
+pandas
+numpy
+shap
+matplotlib
+seaborn
+joblib
