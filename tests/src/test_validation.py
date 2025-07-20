@@ -72,15 +72,15 @@ class TestEvaluationMetrics:
         assert 0 <= auc <= 1
 
     def test_prediction_distribution(self):
-        """予測分布統計のテスト"""
+        """予測分布統計のテスト（CMIセンサーデータ）"""
         predictions = np.array([0, 1, 1, 0, 1, 1, 0])
 
-        extrovert_ratio = np.mean(predictions)  # 1の比率
-        introvert_ratio = 1 - extrovert_ratio  # 0の比率
+        behavior_ratio = np.mean(predictions)  # 1の比率
+        no_behavior_ratio = 1 - behavior_ratio  # 0の比率
 
-        assert abs(extrovert_ratio + introvert_ratio - 1.0) < 1e-10
-        assert 0 <= extrovert_ratio <= 1
-        assert 0 <= introvert_ratio <= 1
+        assert abs(behavior_ratio + no_behavior_ratio - 1.0) < 1e-10
+        assert 0 <= behavior_ratio <= 1
+        assert 0 <= no_behavior_ratio <= 1
 
 
 class TestCVScoring:

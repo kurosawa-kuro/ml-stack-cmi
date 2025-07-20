@@ -87,26 +87,45 @@ def sample_gold_data() -> pd.DataFrame:
 
 @pytest.fixture
 def edge_case_data() -> pd.DataFrame:
-    """エッジケースを含むテストデータ"""
+    """エッジケースを含むテストデータ（CMIセンサーデータ）"""
     return pd.DataFrame({
-        "Time_spent_Alone": [0.0, 24.0, 25.0, -1.0, None],
-        "Social_event_attendance": [0.0, 10.0, -5.0, None, 5.0],
-        "Stage_fear": ["Yes", "NO", "yes", "no", None],
-        "Drained_after_socializing": ["No", "YES", "no", "yes", None],
-        "Friends_circle_size": [0, 50, -10, None, 25],
-        "Post_frequency": [0.0, 20.0, -5.0, None, 10.0]
+        "row_id": [1, 2, 3, 4, 5],
+        "subject": [1, 1, 2, 2, 3],
+        "sequence_id": [1, 1, 2, 2, 3],
+        "acc_x": [0.0, 100.0, -50.0, None, 0.5],
+        "acc_y": [0.0, 100.0, -50.0, None, 0.6],
+        "acc_z": [0.0, 100.0, -50.0, None, 10.2],
+        "rot_x": [0.0, 10.0, -5.0, None, 0.05],
+        "rot_y": [0.0, 10.0, -5.0, None, 0.06],
+        "rot_z": [0.0, 10.0, -5.0, None, 0.07],
+        "tof_0": [0, 1000, -100, None, 300],
+        "tof_1": [0, 1000, -100, None, 320],
+        "thm_0": [0.0, 100.0, -50.0, None, 27.0],
+        "thm_1": [0.0, 100.0, -50.0, None, 27.1],
+        "behavior": ["no_behavior", "behavior_1", "no_behavior", "behavior_2", "no_behavior"],
+        "gesture": ["none", "gesture_1", "none", "gesture_2", "none"]
     })
 
 
 @pytest.fixture
 def missing_data() -> pd.DataFrame:
-    """欠損値を含むテストデータ"""
+    """欠損値を含むテストデータ（CMIセンサーデータ）"""
     return pd.DataFrame({
-        "Time_spent_Alone": [1.0, np.nan, 3.0, 4.0, np.nan],
-        "Social_event_attendance": [2.0, 4.0, np.nan, 8.0, 10.0],
-        "Going_outside": [1.0, 2.0, 3.0, np.nan, 5.0],
-        "Stage_fear_encoded": [1.0, 0.0, 1.0, 0.0, np.nan],
-        "Drained_after_socializing_encoded": [0.0, 1.0, 0.0, np.nan, 1.0]
+        "row_id": [1, 2, 3, 4, 5],
+        "subject": [1, 1, 2, 2, 3],
+        "sequence_id": [1, 1, 2, 2, 3],
+        "acc_x": [0.1, np.nan, 0.3, 0.4, np.nan],
+        "acc_y": [0.2, 0.3, np.nan, 0.5, 0.6],
+        "acc_z": [9.8, 9.9, 10.0, np.nan, 10.2],
+        "rot_x": [0.01, 0.02, 0.03, 0.04, np.nan],
+        "rot_y": [0.02, np.nan, 0.04, 0.05, 0.06],
+        "rot_z": [0.03, 0.04, np.nan, 0.06, 0.07],
+        "tof_0": [100, 150, 200, np.nan, 300],
+        "tof_1": [120, np.nan, 220, 270, 320],
+        "thm_0": [25.0, 25.5, np.nan, 26.5, 27.0],
+        "thm_1": [25.1, np.nan, 26.1, 26.6, 27.1],
+        "behavior": ["no_behavior", "behavior_1", "no_behavior", "behavior_2", "no_behavior"],
+        "gesture": ["none", "gesture_1", "none", "gesture_2", "none"]
     })
 
 
@@ -282,7 +301,7 @@ def assert_feature_engineering_quality(df: pd.DataFrame, min_new_features: int =
     """特徴量エンジニアリングの品質をアサート"""
     # 新しい特徴量が追加されているかチェック
     new_features = [col for col in df.columns if any(keyword in col.lower() 
-                   for keyword in ['ratio', 'interaction', 'score', 'poly_', 'scaled', 'participation_rate', 'communication_ratio', 'social_efficiency', 'activity_balance', 'non_social'])]
+                   for keyword in ['ratio', 'interaction', 'score', 'poly_', 'scaled', 'motion', 'intensity', 'thermal', 'fusion', 'spectral', 'fft', 'tsfresh'])]
     assert len(new_features) >= min_new_features, f"Expected {min_new_features}+ new features, got {len(new_features)}"
     
     # 特徴量の品質チェック

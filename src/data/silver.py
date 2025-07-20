@@ -245,304 +245,151 @@ def extract_tsfresh_features(df: pd.DataFrame, max_features: int = 50) -> pd.Dat
 
 
 def extract_behavior_specific_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Behavior-specific feature extraction for BFRB detection
-    
-    CLAUDE.md: Domain knowledge features for Body-Focused Repetitive Behaviors
-    """
+    """Extract behavior-specific features for CMI sensor data"""
     df = df.copy()
     
-    # Hand-to-face movement patterns (key for BFRB detection)
-    acc_cols = [col for col in df.columns if col.startswith('acc_')]
-    if acc_cols:
-        acc_data = df[acc_cols]
-        
-        # Movement intensity patterns (with overflow protection)
-        movement_intensity = np.sqrt((acc_data ** 2).sum(axis=1))
-        df['movement_intensity'] = np.clip(movement_intensity, 0, 1e3)
-        movement_smoothness = acc_data.diff().abs().sum(axis=1)
-        df['movement_smoothness'] = np.clip(movement_smoothness, 0, 1e3)
-        
-        # Repetitive motion detection (with overflow protection)
-        if len(acc_data) > 10:
-            movement_periodicity = acc_data.rolling(window=5, min_periods=1).std().mean(axis=1)
-            df['movement_periodicity'] = np.clip(movement_periodicity, 0, 100)
-            movement_regularity = 1 / (acc_data.rolling(window=5, min_periods=1).var().mean(axis=1) + 1e-8)
-            df['movement_regularity'] = np.clip(movement_regularity, 0, 100)
-            
-    # Distance-based features (ToF sensors for proximity detection)
-    tof_cols = [col for col in df.columns if col.startswith('tof_')][:10]  # Limit ToF features
-    if tof_cols:
-        tof_data = df[tof_cols]
-        
-        # Proximity patterns
-        df['proximity_mean'] = tof_data.mean(axis=1)
-        df['proximity_min'] = tof_data.min(axis=1) 
-        df['proximity_variance'] = tof_data.var(axis=1)
-        
-        # Face-contact indicators
-        proximity_threshold = tof_data.quantile(0.25, axis=1, numeric_only=True)
-        df['close_proximity_ratio'] = (tof_data.values < proximity_threshold.values.reshape(-1, 1)).mean(axis=1)
-        
-    # Temperature-based features (Thermopile for contact detection)
-    thermal_cols = [col for col in df.columns if col.startswith('thm_')]
-    if thermal_cols:
-        thermal_data = df[thermal_cols]
-        
-        # Temperature distribution patterns
-        df['thermal_mean'] = thermal_data.mean(axis=1)
-        df['thermal_gradient'] = thermal_data.max(axis=1) - thermal_data.min(axis=1)
-        
-        # Contact detection
-        thermal_threshold = thermal_data.quantile(0.75, axis=1, numeric_only=True)
-        df['thermal_contact_indicator'] = (thermal_data.values > thermal_threshold.values.reshape(-1, 1)).mean(axis=1)
-        
+    # Motion-based features
+    if "acc_x" in df.columns and "acc_y" in df.columns and "acc_z" in df.columns:
+        df["total_motion"] = np.sqrt(df["acc_x"]**2 + df["acc_y"]**2 + df["acc_z"]**2)
+        df["motion_intensity"] = df["total_motion"].rolling(window=10, min_periods=1).mean()
+        df["motion_variance"] = df["total_motion"].rolling(window=10, min_periods=1).var().fillna(0)
+    
+    # Rotation-based features
+    if "rot_x" in df.columns and "rot_y" in df.columns and "rot_z" in df.columns:
+        df["total_rotation"] = np.sqrt(df["rot_x"]**2 + df["rot_y"]**2 + df["rot_z"]**2)
+        df["rotation_intensity"] = df["total_rotation"].rolling(window=10, min_periods=1).mean()
+    
+    # ToF distance features
+    tof_columns = [col for col in df.columns if col.startswith("tof_")]
+    if tof_columns:
+        df["tof_mean"] = df[tof_columns].mean(axis=1)
+        df["tof_std"] = df[tof_columns].std(axis=1).fillna(0)
+        df["tof_range"] = df[tof_columns].max(axis=1) - df[tof_columns].min(axis=1)
+    
+    # Thermal features
+    thermal_columns = [col for col in df.columns if col.startswith("thm_")]
+    if thermal_columns:
+        df["thermal_mean"] = df[thermal_columns].mean(axis=1)
+        df["thermal_std"] = df[thermal_columns].std(axis=1).fillna(0)
+        df["thermal_range"] = df[thermal_columns].max(axis=1) - df[thermal_columns].min(axis=1)
+    
+    # Cross-modal features
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        df["thermal_distance_interaction"] = df["thermal_mean"] - df["tof_mean"]
+    
     return df
 
 
 def advanced_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Advanced feature engineering for CMI sensor data (CLAUDE.md specification)
-    
-    Silver Layer: Time-series Feature Engineering & Multimodal Sensor Fusion
-    """
+    """Advanced feature engineering for CMI sensor data"""
     df = df.copy()
-
-    # Legacy features (keeping for backward compatibility)
-    if "Social_event_attendance" in df.columns and "Going_outside" in df.columns:
-        df["social_participation_rate"] = (
-            df["Social_event_attendance"] / (df["Going_outside"] + 1e-8)
-        ).astype('float32')
     
-    if "Post_frequency" in df.columns and "Social_event_attendance" in df.columns and "Going_outside" in df.columns:
-        total_activity = df["Social_event_attendance"] + df["Going_outside"]
-        df["communication_ratio"] = (
-            df["Post_frequency"] / (total_activity + 1e-8)
-        ).astype('float32')
-    
-    if "Social_event_attendance" in df.columns and "Friends_circle_size" in df.columns:
-        df["friend_social_efficiency"] = (
-            df["Social_event_attendance"] / (df["Friends_circle_size"] + 1e-8)
-        ).astype('float32')
-    
-    if "Going_outside" in df.columns and "Social_event_attendance" in df.columns:
-        df["non_social_outings"] = (
-            df["Going_outside"] - df["Social_event_attendance"]
-        ).astype('float32')
-    
-    if "Time_spent_Alone" in df.columns and "Social_event_attendance" in df.columns:
-        df["activity_balance"] = (
-            df["Social_event_attendance"] / (df["Time_spent_Alone"] + 1e-8)
-        ).astype('float32')
-    
-    if "Social_event_attendance" in df.columns and "Time_spent_Alone" in df.columns:
-        df["social_ratio"] = (
-            df["Social_event_attendance"] / (df["Time_spent_Alone"] + 1e-8)
-        ).astype('float32')
-
-    if "Going_outside" in df.columns and "Social_event_attendance" in df.columns:
-        df["activity_sum"] = (
-            df["Going_outside"] + df["Social_event_attendance"]
-        ).astype('float32')
-
-    # 新しい特徴量（Silver層固有）
-    numeric_cols = [
-        "Time_spent_Alone",
-        "Social_event_attendance",
-        "Going_outside",
-        "Friends_circle_size",
-        "Post_frequency",
-    ]
-
-    # 統計的特徴量
-    if all(col in df.columns for col in numeric_cols):
-        df["total_activity"] = df[numeric_cols].sum(axis=1)
-        df["avg_activity"] = df[numeric_cols].mean(axis=1)
-        df["activity_std"] = df[numeric_cols].clip(-50, 50).std(axis=1).fillna(0)
-        df["activity_min"] = df[numeric_cols].min(axis=1)
-        df["activity_max"] = df[numeric_cols].max(axis=1)
-        df["activity_range"] = df["activity_max"] - df["activity_min"]
-
-    # 比率特徴量
-    if "Friends_circle_size" in df.columns and "Post_frequency" in df.columns:
-        df["post_per_friend"] = df["Post_frequency"] / (df["Friends_circle_size"] + 1e-8)
-        df["friend_efficiency"] = df["Friends_circle_size"] / (df["Post_frequency"] + 1e-8)
-
-    # 二項交互作用
-    if "Stage_fear_encoded" in df.columns and "Drained_after_socializing_encoded" in df.columns:
-        df["fear_drain_interaction"] = df["Stage_fear_encoded"] * df["Drained_after_socializing_encoded"]
-        df["fear_drain_sum"] = df["Stage_fear_encoded"] + df["Drained_after_socializing_encoded"]
-        df["fear_drain_ratio"] = df["Stage_fear_encoded"] / (df["Drained_after_socializing_encoded"] + 1e-8)
-    
-    # 追加の交互作用特徴量（確実に作成）
-    if "Social_event_attendance" in df.columns and "Time_spent_Alone" in df.columns:
-        df["social_alone_interaction"] = df["Social_event_attendance"] * df["Time_spent_Alone"]
-        df["social_alone_ratio"] = df["Social_event_attendance"] / (df["Time_spent_Alone"] + 1e-8)
-    
-    if "Friends_circle_size" in df.columns and "Post_frequency" in df.columns:
-        df["friends_post_interaction"] = df["Friends_circle_size"] * df["Post_frequency"]
-        df["friends_post_ratio"] = df["Friends_circle_size"] / (df["Post_frequency"] + 1e-8)
-
-    # 外向性スコア（仮説ベース）
-    extrovert_features = []
-    if "Social_event_attendance" in df.columns:
-        extrovert_features.append("Social_event_attendance")
-    if "Going_outside" in df.columns:
-        extrovert_features.append("Going_outside")
-    if "Friends_circle_size" in df.columns:
-        extrovert_features.append("Friends_circle_size")
-
-    if extrovert_features:
-        df["extrovert_score"] = df[extrovert_features].sum(axis=1)
-        df["extrovert_avg"] = df[extrovert_features].mean(axis=1)
-        df["extrovert_std"] = df[extrovert_features].clip(-50, 50).std(axis=1).fillna(0)
-
-    # 内向性スコア
-    introvert_features = []
-    if "Time_spent_Alone" in df.columns:
-        introvert_features.append("Time_spent_Alone")
-    if "Stage_fear_encoded" in df.columns:
-        introvert_features.append("Stage_fear_encoded")
-    if "Drained_after_socializing_encoded" in df.columns:
-        introvert_features.append("Drained_after_socializing_encoded")
-
-    if introvert_features:
-        df["introvert_score"] = df[introvert_features].sum(axis=1)
-        df["introvert_avg"] = df[introvert_features].mean(axis=1)
-        # std計算でNaNが発生しないように修正
-        introvert_data = df[introvert_features].fillna(0)
-        df["introvert_std"] = introvert_data.std(axis=1).fillna(0)
-
-    # 複合指標
-    if "extrovert_score" in df.columns and "introvert_score" in df.columns:
-        df["personality_balance"] = df["extrovert_score"] - df["introvert_score"]
-        # 極端な値を避けるため、分母を1以上に制限
-        introvert_denominator = df["introvert_score"].clip(lower=1)
-        df["personality_ratio"] = df["extrovert_score"] / introvert_denominator
-        df["personality_sum"] = df["extrovert_score"] + df["introvert_score"]
-
-    # 時間関連特徴量
-    if "Time_spent_Alone" in df.columns:
-        df["alone_percentage"] = df["Time_spent_Alone"] / 24.0  # 24時間中の割合
-        df["alone_squared"] = df["Time_spent_Alone"] ** 2
-        # 無限値を避けるため、log1pを使用し、負の値を0に置換
-        time_alone_positive = df["Time_spent_Alone"].clip(lower=0)
-        df["alone_log"] = np.log1p(time_alone_positive)
-
-    # ソーシャル関連特徴量
-    if "Social_event_attendance" in df.columns:
-        df["social_squared"] = df["Social_event_attendance"] ** 2
-        df["social_log"] = np.log1p(df["Social_event_attendance"])
-        df["social_percentage"] = df["Social_event_attendance"] / (df["Social_event_attendance"].max() + 1e-8)
-
-    # CMI-specific sensor feature engineering pipeline (CLAUDE.md specification)
-    # Step 1: Time-series statistical features
+    # Extract time-series features
     df = extract_time_series_features(df)
     
-    # Step 2: Frequency domain features (FFT analysis)
+    # Extract frequency domain features
     df = extract_frequency_domain_features(df)
     
-    # Step 3: Behavior-specific domain features
+    # Extract tsfresh features
+    df = extract_tsfresh_features(df)
+    
+    # Extract behavior-specific features
     df = extract_behavior_specific_features(df)
     
-    # Step 4: tsfresh comprehensive features (memory-optimized)
-    df = extract_tsfresh_features(df, max_features=50)
-
+    # Motion-based ratios
+    if "total_motion" in df.columns:
+        df["motion_ratio"] = df["total_motion"] / (df["total_motion"].max() + 1e-8)
+    
+    if "motion_intensity" in df.columns:
+        df["intensity_ratio"] = df["motion_intensity"] / (df["motion_intensity"].max() + 1e-8)
+    
+    # Sensor fusion features
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        df["sensor_fusion_score"] = (df["tof_mean"] + df["thermal_mean"]) / 2
+        df["sensor_balance"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
+    
+    # Statistical aggregation
+    sensor_columns = [col for col in df.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'tof_', 'thm_'])]
+    if sensor_columns:
+        df["sensor_mean"] = df[sensor_columns].mean(axis=1)
+        df["sensor_std"] = df[sensor_columns].std(axis=1).fillna(0)
+        df["sensor_range"] = df[sensor_columns].max(axis=1) - df[sensor_columns].min(axis=1)
+    
     return df
 
 
 def enhanced_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
-    """強化された交互作用特徴量 - 上位特徴量の組み合わせ"""
+    """Enhanced interaction features for CMI sensor data"""
     df = df.copy()
-
-    # 上位特徴量の交互作用項（重要度順）
-    top_features = ["extrovert_score", "social_ratio", "social_participation_rate"]
-
-    # 1. extrovert_score と social_ratio の交互作用
-    if all(col in df.columns for col in ["extrovert_score", "social_ratio"]):
-        df["extrovert_social_interaction"] = df["extrovert_score"] * df["social_ratio"]
-        df["extrovert_social_ratio"] = df["extrovert_score"] / (df["social_ratio"] + 1e-8)
-        df["social_extrovert_ratio"] = df["social_ratio"] / (df["extrovert_score"] + 1e-8)
-
-    # 2. extrovert_score と他の重要特徴量との交互作用
-    if "extrovert_score" in df.columns:
-        if "Social_event_attendance" in df.columns:
-            df["extrovert_social_event_interaction"] = df["extrovert_score"] * df["Social_event_attendance"]
-            df["extrovert_social_event_ratio"] = df["extrovert_score"] / (df["Social_event_attendance"] + 1e-8)
-
-        if "Time_spent_Alone" in df.columns:
-            df["extrovert_alone_interaction"] = df["extrovert_score"] * df["Time_spent_Alone"]
-            df["extrovert_alone_contrast"] = df["extrovert_score"] - df["Time_spent_Alone"]
-            df["extrovert_alone_ratio"] = df["extrovert_score"] / (df["Time_spent_Alone"] + 1e-8)
-
-        if "Drained_after_socializing_encoded" in df.columns:
-            df["extrovert_drain_interaction"] = df["extrovert_score"] * df["Drained_after_socializing_encoded"]
-            # 極端な値を避けるため、分母を1以上に制限
-            drain_denominator = df["Drained_after_socializing_encoded"].clip(lower=1)
-            df["extrovert_drain_ratio"] = df["extrovert_score"] / drain_denominator
-
-        if "Friends_circle_size" in df.columns:
-            df["extrovert_friends_interaction"] = df["extrovert_score"] * df["Friends_circle_size"]
-            df["extrovert_friends_ratio"] = df["extrovert_score"] / (df["Friends_circle_size"] + 1e-8)
-
-    # 3. social_ratio と他の特徴量との交互作用
-    if "social_ratio" in df.columns:
-        if "Friends_circle_size" in df.columns:
-            df["social_friends_interaction"] = df["social_ratio"] * df["Friends_circle_size"]
-            df["social_friends_ratio"] = df["social_ratio"] / (df["Friends_circle_size"] + 1e-8)
-
-        if "Going_outside" in df.columns:
-            df["social_outside_interaction"] = df["social_ratio"] * df["Going_outside"]
-            df["social_outside_ratio"] = df["social_ratio"] / (df["Going_outside"] + 1e-8)
-
-        if "Post_frequency" in df.columns:
-            df["social_post_interaction"] = df["social_ratio"] * df["Post_frequency"]
-            df["social_post_ratio"] = df["social_ratio"] / (df["Post_frequency"] + 1e-8)
-
-    # 4. social_participation_rate との交互作用
-    if "social_participation_rate" in df.columns:
-        if "Time_spent_Alone" in df.columns:
-            df["participation_alone_interaction"] = df["social_participation_rate"] * df["Time_spent_Alone"]
-            df["participation_alone_ratio"] = df["social_participation_rate"] / (df["Time_spent_Alone"] + 1e-8)
-
-        if "Friends_circle_size" in df.columns:
-            df["participation_friends_interaction"] = df["social_participation_rate"] * df["Friends_circle_size"]
-            df["participation_friends_ratio"] = df["social_participation_rate"] / (df["Friends_circle_size"] + 1e-8)
-
-    # 5. 三項交互作用（最重要特徴量のみ）
-    if all(col in df.columns for col in ["extrovert_score", "social_ratio", "Social_event_attendance"]):
-        df["triple_interaction"] = df["extrovert_score"] * df["social_ratio"] * df["Social_event_attendance"]
-
-    if all(col in df.columns for col in ["extrovert_score", "social_participation_rate", "Time_spent_Alone"]):
-        df["triple_participation_interaction"] = df["extrovert_score"] * df["social_participation_rate"] * df["Time_spent_Alone"]
-
-    # 6. 複合比率特徴量
-    if all(col in df.columns for col in ["social_ratio", "communication_ratio", "friend_social_efficiency"]):
-        df["composite_social_score"] = (df["social_ratio"] + df["communication_ratio"] + df["friend_social_efficiency"]) / 3
-        df["social_efficiency_balance"] = df["social_ratio"] * df["friend_social_efficiency"]
-
+    
+    # Top features for interaction
+    top_features = ["motion_intensity", "total_motion", "tof_mean"]
+    
+    # 1. Motion intensity interactions
+    if all(col in df.columns for col in ["motion_intensity", "total_motion"]):
+        df["motion_intensity_interaction"] = df["motion_intensity"] * df["total_motion"]
+        df["motion_intensity_ratio"] = df["motion_intensity"] / (df["total_motion"] + 1e-8)
+        df["motion_total_ratio"] = df["total_motion"] / (df["motion_intensity"] + 1e-8)
+    
+    # 2. Motion intensity with other features
+    if "motion_intensity" in df.columns:
+        if "tof_mean" in df.columns:
+            df["motion_tof_interaction"] = df["motion_intensity"] * df["tof_mean"]
+            df["motion_tof_ratio"] = df["motion_intensity"] / (df["tof_mean"] + 1e-8)
+        
+        if "thermal_mean" in df.columns:
+            df["motion_thermal_interaction"] = df["motion_intensity"] * df["thermal_mean"]
+            df["motion_thermal_contrast"] = df["motion_intensity"] - df["thermal_mean"]
+            df["motion_thermal_ratio"] = df["motion_intensity"] / (df["thermal_mean"] + 1e-8)
+        
+        if "rotation_intensity" in df.columns:
+            df["motion_rotation_interaction"] = df["motion_intensity"] * df["rotation_intensity"]
+            df["motion_rotation_ratio"] = df["motion_intensity"] / (df["rotation_intensity"] + 1e-8)
+    
+    # 3. ToF interactions
+    if "tof_mean" in df.columns:
+        if "thermal_mean" in df.columns:
+            df["tof_thermal_interaction"] = df["tof_mean"] * df["thermal_mean"]
+            df["tof_thermal_ratio"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
+        
+        if "rotation_intensity" in df.columns:
+            df["tof_rotation_interaction"] = df["tof_mean"] * df["rotation_intensity"]
+            df["tof_rotation_ratio"] = df["tof_mean"] / (df["rotation_intensity"] + 1e-8)
+    
+    # 4. Triple interactions
+    if all(col in df.columns for col in ["motion_intensity", "tof_mean", "thermal_mean"]):
+        df["triple_sensor_interaction"] = df["motion_intensity"] * df["tof_mean"] * df["thermal_mean"]
+    
+    if all(col in df.columns for col in ["motion_intensity", "total_motion", "rotation_intensity"]):
+        df["triple_motion_interaction"] = df["motion_intensity"] * df["total_motion"] * df["rotation_intensity"]
+    
+    # 5. Composite scores
+    if all(col in df.columns for col in ["tof_mean", "thermal_mean", "motion_intensity"]):
+        df["composite_sensor_score"] = (df["tof_mean"] + df["thermal_mean"] + df["motion_intensity"]) / 3
+        df["sensor_balance_score"] = df["tof_mean"] * df["thermal_mean"]
+    
     return df
 
 
 def polynomial_features(df: pd.DataFrame, degree: int = 2) -> pd.DataFrame:
-    """多項式特徴量生成（degree=2で非線形関係を捕捉）"""
+    """多項式特徴量生成（CMIセンサーデータ用）"""
     df = df.copy()
-
-    # 多項式特徴量を適用する数値特徴量を選定
-    key_features = []
-
+    
     # 上位特徴量のみ選択（数値のみ確保）
     top_numeric_features = [
-        "extrovert_score",
-        "social_ratio",
-        "social_participation_rate",
-        "communication_ratio",
-        "friend_social_efficiency",
-        "Social_event_attendance",
-        "Time_spent_Alone",
-        "Friends_circle_size",
-        "Going_outside",
-        "Post_frequency",
+        "motion_intensity",
+        "total_motion",
+        "tof_mean",
+        "thermal_mean",
+        "rotation_intensity",
+        "motion_variance",
+        "thermal_distance_interaction",
+        "sensor_fusion_score",
+        "motion_ratio",
+        "intensity_ratio"
     ]
 
+    key_features = []
     for feature in top_numeric_features:
         if feature in df.columns:
             # 数値型であることを確認
@@ -684,7 +531,7 @@ def create_silver_tables() -> None:
     print(f"- silver.train: {len(train_silver)} rows, {len(train_silver.columns)} columns")
     print(f"- silver.test: {len(test_silver)} rows, {len(test_silver.columns)} columns")
     print(f"- Total Engineered Features: {len(train_silver.columns) - len(train_bronze.columns)} features generated")
-    print(f"- Winner Solution features: {len([col for col in train_silver.columns if any(keyword in col for keyword in ['participation_rate', 'communication_ratio', 'social_efficiency'])])}")
+    print(f"- Sensor features: {len([col for col in train_silver.columns if any(keyword in col for keyword in ['motion', 'tof', 'thermal', 'sensor'])])}")
     print(f"- Interaction features: {len([col for col in train_silver.columns if 'interaction' in col.lower()])}")
     print(f"- Polynomial features: {len([col for col in train_silver.columns if col.startswith('poly_')])}")
     print(f"- Power transformed features: {len([col for col in train_silver.columns if col.endswith('_power')])}")
@@ -712,104 +559,78 @@ def load_silver_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def s5e7_interaction_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Winner Solution Interaction Features (+0.2-0.4% proven impact)"""
+    """Interaction features for CMI sensor data"""
     df = df.copy()
     
-    # Social_event_participation_rate = Social_event_attendance ÷ Going_outside
-    if 'Social_event_attendance' in df.columns and 'Going_outside' in df.columns:
-        df['Social_event_participation_rate'] = df['Social_event_attendance'] / (df['Going_outside'] + 1e-8)
+    # Social event participation rate (sensor-based)
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        df["sensor_participation_rate"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
-    # Non_social_outings = Going_outside - Social_event_attendance
-    if 'Going_outside' in df.columns and 'Social_event_attendance' in df.columns:
-        df['Non_social_outings'] = df['Going_outside'] - df['Social_event_attendance']
+    # Non-social outings (motion-based)
+    if "motion_intensity" in df.columns and "total_motion" in df.columns:
+        df["non_social_motion"] = df["motion_intensity"] - df["total_motion"]
     
-    # Communication_ratio = Post_frequency ÷ (Social_event_attendance + Going_outside)
-    if all(col in df.columns for col in ['Post_frequency', 'Social_event_attendance', 'Going_outside']):
-        df['Communication_ratio'] = df['Post_frequency'] / (df['Social_event_attendance'] + df['Going_outside'] + 1e-8)
+    # Communication ratio (sensor-based)
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns and "motion_intensity" in df.columns:
+        total_sensor = df["tof_mean"] + df["thermal_mean"]
+        df["sensor_communication_ratio"] = df["motion_intensity"] / (total_sensor + 1e-8)
     
-    # Friend_social_efficiency = Social_event_attendance ÷ Friends_circle_size
-    if 'Social_event_attendance' in df.columns and 'Friends_circle_size' in df.columns:
-        df['Friend_social_efficiency'] = df['Social_event_attendance'] / (df['Friends_circle_size'] + 1e-8)
+    # Friend social efficiency (sensor-based)
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        df["sensor_efficiency"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
     return df
 
 
 def s5e7_drain_adjusted_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Fatigue-Adjusted Domain Modeling (+0.1-0.2% introversion accuracy)"""
+    """Drain adjusted features for CMI sensor data"""
     df = df.copy()
     
-    # Activity_ratio = comprehensive_activity_index
-    activity_cols = ['Social_event_attendance', 'Going_outside', 'Post_frequency']
-    available_cols = [col for col in activity_cols if col in df.columns]
-    if available_cols:
-        df['Activity_ratio'] = df[available_cols].sum(axis=1)
+    # Activity ratio based on motion
+    if "motion_intensity" in df.columns and "total_motion" in df.columns:
+        df["activity_ratio"] = df["motion_intensity"] / (df["total_motion"] + 1e-8)
     
-    # Drain_adjusted_activity = activity_ratio × (1 - Drained_after_socializing_encoded)
-    if 'Activity_ratio' in df.columns and 'Drained_after_socializing_encoded' in df.columns:
-        df['Drain_adjusted_activity'] = df['Activity_ratio'] * (1 - df['Drained_after_socializing_encoded'])
-    elif 'Activity_ratio' in df.columns and 'Drained_after_socializing' in df.columns:
-        # Fallback: encode if not already encoded
-        df['Drain_adjusted_activity'] = df['Activity_ratio'] * (1 - (df['Drained_after_socializing'] == 'Yes').astype(float))
+    # Drain adjusted activity (based on thermal patterns)
+    if "thermal_mean" in df.columns and "motion_intensity" in df.columns:
+        df["drain_adjusted_activity"] = df["motion_intensity"] * (1 - df["thermal_mean"] / 100)
     
-    # Introvert_extrovert_spectrum = quantified_personality_score
-    extrovert_features = ['Social_event_attendance', 'Going_outside', 'Friends_circle_size']
-    introvert_features = ['Time_spent_Alone']
-    
-    extrovert_sum = 0
-    for col in extrovert_features:
-        if col in df.columns:
-            extrovert_sum += df[col]
-    
-    introvert_sum = 0
-    for col in introvert_features:
-        if col in df.columns:
-            introvert_sum += df[col]
-    
-    if isinstance(extrovert_sum, pd.Series) or isinstance(introvert_sum, pd.Series):
-        df['Introvert_extrovert_spectrum'] = extrovert_sum - introvert_sum
+    # Sensor spectrum (multi-modal balance)
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns and "motion_intensity" in df.columns:
+        df["sensor_spectrum"] = (df["tof_mean"] + df["thermal_mean"] + df["motion_intensity"]) / 3
     
     return df
 
 
 def s5e7_communication_ratios(df: pd.DataFrame) -> pd.DataFrame:
-    """Online vs Offline behavioral ratios"""
+    """Communication ratios for CMI sensor data"""
     df = df.copy()
     
-    # Online_offline_ratio = Post_frequency ÷ (Social_event_attendance + Going_outside)
-    if all(col in df.columns for col in ['Post_frequency', 'Social_event_attendance', 'Going_outside']):
-        df['Online_offline_ratio'] = df['Post_frequency'] / (df['Social_event_attendance'] + df['Going_outside'] + 1e-8)
+    # Sensor communication ratios
+    if "tof_mean" in df.columns and "thermal_mean" in df.columns:
+        df["sensor_communication_ratio"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
-    # Communication_balance = balanced ratio calculation
-    if 'Post_frequency' in df.columns and 'Social_event_attendance' in df.columns:
-        total_communication = df['Post_frequency'] + df['Social_event_attendance']
-        df['Communication_balance'] = df['Post_frequency'] / (total_communication + 1e-8)
+    if "motion_intensity" in df.columns and "total_motion" in df.columns:
+        df["motion_communication_ratio"] = df["motion_intensity"] / (df["total_motion"] + 1e-8)
+    
+    if "tof_mean" in df.columns and "motion_intensity" in df.columns:
+        df["tof_motion_efficiency"] = df["tof_mean"] / (df["motion_intensity"] + 1e-8)
     
     return df
 
 
 def get_feature_importance_order() -> list:
-    """特徴量重要度順リスト（経験的順序）"""
+    """Get feature importance order for CMI sensor data"""
     return [
-        "extrovert_score",
-        "introvert_score",
-        "Social_event_attendance",
-        "Time_spent_Alone",
-        "Drained_after_socializing_encoded",
-        "Stage_fear_encoded",
-        "social_ratio",
-        "social_participation_rate",
-        "communication_ratio",
-        "friend_social_efficiency",
-        "Friends_circle_size",
-        "Going_outside",
-        "Post_frequency",
-        "activity_sum",
-        "post_per_friend",
-        "fear_drain_interaction",
-        "total_activity",
-        "avg_activity",
-        "personality_balance",
-        "personality_ratio",
+        "motion_intensity",
+        "total_motion",
+        "tof_mean",
+        "thermal_mean",
+        "rotation_intensity",
+        "motion_variance",
+        "thermal_distance_interaction",
+        "sensor_fusion_score",
+        "motion_ratio",
+        "intensity_ratio"
     ]
 
 
@@ -960,8 +781,8 @@ class AdvancedStatisticalFeatures(BaseEstimator, TransformerMixin):
         """Fit KNN imputer only on original features"""
         # Only apply KNN to original Bronze features, not derived polynomial features
         original_numeric_features = [
-            'Time_spent_Alone', 'Social_event_attendance', 'Going_outside', 
-            'Friends_circle_size', 'Post_frequency'
+            'acc_x', 'acc_y', 'acc_z', 'rot_x', 'rot_y', 'rot_z',
+            'tof_0', 'tof_1', 'thm_0', 'thm_1'
         ]
         self.original_features = [f for f in original_numeric_features if f in X.columns]
         
@@ -1026,7 +847,7 @@ class AdvancedStatisticalFeatures(BaseEstimator, TransformerMixin):
             X_transformed = pd.concat([X_transformed, stats_df], axis=1)
             
             # Feature-specific moments for key features
-            key_features = ['Social_event_attendance', 'Time_spent_Alone', 'Friends_circle_size']
+            key_features = ['motion_intensity', 'total_motion', 'tof_mean']
             key_feature_stats = {}
             for feat in key_features:
                 if feat in X_transformed.columns:
@@ -1109,12 +930,14 @@ class FoldSafeSilverPreprocessor(BaseEstimator, TransformerMixin):
         
         # Target encoding for categorical features (if enabled and y provided)
         if self.use_target_encoding and y is not None:
-            categorical_cols = ['Stage_fear_encoded', 'Drained_after_socializing_encoded']
+            categorical_cols = ['behavior', 'gesture']
             available_cats = [col for col in categorical_cols if col in X_silver.columns]
             if available_cats:
-                self.target_encoder = CVSafeTargetEncoder(cols=available_cats, smoothing=1.0)
+                self.target_encoder = CVSafeTargetEncoder(
+                    cols=available_cats, 
+                    smoothing=self.target_smoothing
+                )
                 self.target_encoder.fit(X_silver, y)
-                X_silver = self.target_encoder.transform(X_silver)
         
         # Fit scaler on numeric features only
         numeric_features = X_silver.select_dtypes(include=[np.number]).columns
@@ -1183,7 +1006,7 @@ class EnhancedSilverPreprocessor(BaseEstimator, TransformerMixin):
             self.stat_engineer.fit(X, y)
         
         if self.use_target_encoding and y is not None:
-            categorical_cols = ['Stage_fear_encoded', 'Drained_after_socializing_encoded']
+            categorical_cols = ['behavior', 'gesture']
             available_cats = [col for col in categorical_cols if col in X.columns]
             if available_cats:
                 self.target_encoder = CVSafeTargetEncoder(

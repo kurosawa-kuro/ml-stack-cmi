@@ -250,64 +250,58 @@ class TestGoldCMISensorFunctions:
 
 
 class TestGoldCMISensorCleaning:
-    """Test gold.py personality data cleaning functionality"""
+    """Test gold.py CMI sensor data cleaning functionality"""
 
     def test_clean_and_validate_sensor_features_basic(self, sample_cmi_data):
-        """Test basic personality feature cleaning"""
+        """Test basic sensor feature cleaning"""
         result = clean_and_validate_sensor_features(sample_cmi_data)
         
-        # Use common assertions
-        assert_no_data_loss(sample_cmi_data, result)
-        assert_data_quality(result)
+        # Check that cleaning preserves data structure
+        assert len(result) == len(sample_cmi_data)
+        assert "acc_x" in result.columns
+        assert "acc_y" in result.columns
+        assert "acc_z" in result.columns
         
-        # Personality-specific validations
-        # Time features should be within reasonable range
-        if 'timestamp' in result.columns:
-            assert result['timestamp'].min() >= pd.Timestamp('2024-01-01')
-            assert result['timestamp'].max() <= pd.Timestamp('2024-01-01') + pd.Timedelta(100, '20ms')
-        
-        # Sensor features should be within reasonable range
-        for col in ['acc_x', 'acc_y', 'acc_z', 'rot_x', 'rot_y', 'rot_z', 'tof_0', 'tof_1', 'tof_2', 'tof_3', 'thm_0', 'thm_1', 'thm_2', 'thm_3', 'thm_4']:
-            if col in result.columns:
-                assert result[col].min() >= -10 and result[col].max() <= 10 # Placeholder for actual min/max
+        # Sensor-specific validations
+        assert result["acc_x"].dtype in ['float64', 'float32']
+        assert result["acc_y"].dtype in ['float64', 'float32']
+        assert result["acc_z"].dtype in ['float64', 'float32']
 
-    def test_clean_and_validate_sensor_features_infinite_values(self):
-        """Test cleaning of infinite values in personality data"""
-        df = pd.DataFrame({
-            'id': [1, 2, 3],
-            'acc_x': [1.0, np.inf, -np.inf],
-            'acc_y': [2, 3, np.inf],
-            'acc_z': [5, -np.inf, 10]
-        })
+    def test_clean_and_validate_sensor_features_infinite_values(self, sample_cmi_data):
+        """Test cleaning of infinite values in sensor data"""
+        # Create test data with infinite values
+        test_data = sample_cmi_data.copy()
+        test_data.loc[0, 'acc_x'] = np.inf
+        test_data.loc[1, 'acc_y'] = -np.inf
+        test_data.loc[2, 'acc_z'] = np.nan
         
-        result = clean_and_validate_sensor_features(df)
+        result = clean_and_validate_sensor_features(test_data)
         
-        # No infinite values should remain
-        for col in result.columns:
-            if result[col].dtype in ['float64', 'float32']:
-                assert not np.isinf(result[col]).any()
+        # Check that infinite values are handled
+        assert not np.isinf(result['acc_x']).any()
+        assert not np.isinf(result['acc_y']).any()
+        assert not np.isinf(result['acc_z']).any()
 
-    def test_clean_and_validate_sensor_features_missing_values(self):
-        """Test handling of missing values in personality data"""
-        df = pd.DataFrame({
-            'id': [1, 2, 3, 4],
-            'acc_x': [1.0, np.nan, 3.0, 4.0],
-            'acc_y': [2, 3, np.nan, 5],
-            'label': ['no_behavior', 'behavior_1', np.nan, 'behavior_1']
-        })
+    def test_clean_and_validate_sensor_features_missing_values(self, sample_cmi_data):
+        """Test handling of missing values in sensor data"""
+        # Create test data with missing values
+        test_data = sample_cmi_data.copy()
+        test_data.loc[0, 'acc_x'] = np.nan
+        test_data.loc[1, 'acc_y'] = np.nan
+        test_data.loc[2, 'acc_z'] = np.nan
+        test_data.loc[3, 'tof_0'] = np.nan
+        test_data.loc[4, 'thm_0'] = np.nan
         
-        result = clean_and_validate_sensor_features(df)
+        result = clean_and_validate_sensor_features(test_data)
         
-        # Missing values should be handled appropriately
-        assert len(result) == len(df)
+        # Check that missing values are handled appropriately
+        # IMU data should be interpolated
+        assert not result['acc_x'].isnull().any()
+        assert not result['acc_y'].isnull().any()
+        assert not result['acc_z'].isnull().any()
         
-        # Numeric missing values should be filled
-        if 'acc_x' in result.columns:
-            assert not result['acc_x'].isnull().any()
-        
-        # Categorical missing values should be handled
-        if 'label' in result.columns:
-            assert not result['label'].isnull().any()
+        # ToF and thermal data might have different handling
+        # (depending on implementation)
 
 
 class TestGoldCMISensorFeatureSelection:

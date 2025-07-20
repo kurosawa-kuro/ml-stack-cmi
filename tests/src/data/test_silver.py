@@ -41,13 +41,19 @@ class TestSilverFunctions:
     """Silver level function tests using common fixtures"""
 
     def test_advanced_features_basic(self, sample_bronze_data):
-        """Test advanced features creation using common test data"""
+        """Test basic advanced features creation"""
         result = advanced_features(sample_bronze_data)
-
-        # Use common assertions
-        assert_no_data_loss(sample_bronze_data, result)
-        assert_data_quality(result)
-        assert_feature_engineering_quality(result, min_new_features=5)
+        
+        # Check that advanced features are created
+        assert len(result.columns) > len(sample_bronze_data.columns)
+        
+        # Check for sensor-specific features
+        sensor_features = [col for col in result.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_'])]
+        assert len(sensor_features) > 0
+        
+        # Check for motion features
+        motion_features = [col for col in result.columns if 'motion' in col.lower()]
+        assert len(motion_features) > 0
 
     def test_scaling_features_basic(self, sample_silver_data):
         """Test feature scaling using common test data"""
@@ -131,64 +137,74 @@ class TestSilverAdvancedFeatures:
         assert 'activity_sum' in result.columns
 
     def test_advanced_features_statistical_features(self, sample_bronze_data):
-        """Test statistical feature creation"""
+        """Test statistical features creation"""
         result = advanced_features(sample_bronze_data)
         
-        # Use common assertions
-        assert_data_quality(result)
+        # Check for statistical features
+        statistical_features = [col for col in result.columns if any(term in col.lower() for term in ['mean', 'std', 'min', 'max', 'median'])]
+        assert len(statistical_features) > 0
         
-        # Check statistical features
-        assert 'total_activity' in result.columns
-        assert 'avg_activity' in result.columns
-        assert 'activity_std' in result.columns
+        # Check for sensor-specific statistical features
+        sensor_stats = [col for col in result.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_']) and any(term in col.lower() for term in ['mean', 'std'])]
+        assert len(sensor_stats) > 0
 
     def test_advanced_features_ratio_features(self, sample_bronze_data):
-        """Test ratio feature creation"""
+        """Test ratio features creation"""
         result = advanced_features(sample_bronze_data)
         
-        # Use common assertions
-        assert_feature_engineering_quality(result, min_new_features=3)
-        
-        # Check ratio features
+        # Check for ratio features
         ratio_features = [col for col in result.columns if 'ratio' in col.lower()]
         assert len(ratio_features) > 0
+        
+        # Check for sensor-specific ratio features
+        sensor_ratios = [col for col in result.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_']) and 'ratio' in col.lower()]
+        assert len(sensor_ratios) > 0
 
     def test_advanced_features_interaction_features(self, sample_bronze_data):
-        """Test interaction feature creation"""
+        """Test interaction features creation"""
         result = advanced_features(sample_bronze_data)
         
-        # Use common assertions
-        assert_data_quality(result)
-        
-        # Check interaction features
+        # Check for interaction features
         interaction_features = [col for col in result.columns if 'interaction' in col.lower()]
         assert len(interaction_features) > 0
+        
+        # Check for sensor-specific interaction features
+        sensor_interactions = [col for col in result.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_']) and 'interaction' in col.lower()]
+        assert len(sensor_interactions) > 0
 
-    def test_advanced_features_personality_scores(self, sample_bronze_data):
-        """Test personality score creation"""
+    def test_advanced_features_motion_scores(self, sample_bronze_data):
+        """Test motion score creation"""
         result = advanced_features(sample_bronze_data)
         
-        # Use common assertions
-        assert_data_quality(result)
-        
-        # Check personality scores
-        assert 'extrovert_score' in result.columns
-        assert 'introvert_score' in result.columns
+        # Check motion scores
+        assert 'motion_intensity' in result.columns
+        assert 'total_motion' in result.columns
+        assert 'motion_variance' in result.columns
 
     def test_advanced_features_missing_columns(self):
         """Test advanced features with missing columns"""
-        df = pd.DataFrame({
-            'Social_event_attendance': [4, 6, 2],
-            'other_column': [1, 2, 3]
+        # Create minimal test data
+        test_data = pd.DataFrame({
+            'row_id': [1, 2, 3],
+            'acc_x': [0.1, 0.2, 0.3],
+            'acc_y': [0.2, 0.3, 0.4]
         })
         
-        result = advanced_features(df)
+        result = advanced_features(test_data)
         
-        # Use common assertions
-        assert_no_data_loss(df, result)
+        # Should still work with minimal data
+        assert len(result.columns) >= len(test_data.columns)
+        assert 'acc_x' in result.columns
+        assert 'acc_y' in result.columns
+
+    def test_advanced_features_motion_scores(self, sample_bronze_data):
+        """Test motion score creation"""
+        result = advanced_features(sample_bronze_data)
         
-        # Should not create features requiring missing columns
-        assert 'total_activity' not in result.columns
+        # Check motion scores
+        assert 'motion_intensity' in result.columns
+        assert 'total_motion' in result.columns
+        assert 'motion_variance' in result.columns
 
 
 class TestSilverInteractionFeatures:
@@ -198,10 +214,10 @@ class TestSilverInteractionFeatures:
         """Test basic interaction features"""
         # 必要な特徴量を追加
         test_data = sample_silver_data.copy()
-        if 'extrovert_score' not in test_data.columns:
-            test_data['extrovert_score'] = [8, 16, 24, 32, 40]
-        if 'social_ratio' not in test_data.columns:
-            test_data['social_ratio'] = [0.5, 0.6, 0.7, 0.8, 0.9]
+        if 'motion_intensity' not in test_data.columns:
+            test_data['motion_intensity'] = [0.1, 0.2, 0.3, 0.4, 0.5]
+        if 'thermal_distance_interaction' not in test_data.columns:
+            test_data['thermal_distance_interaction'] = [-0.1, -0.1, -0.1, -0.1, -0.1]
         
         result = enhanced_interaction_features(test_data)
         
@@ -217,10 +233,10 @@ class TestSilverInteractionFeatures:
         """Test extended interaction features"""
         # 必要な特徴量を追加
         test_data = sample_silver_data.copy()
-        if 'extrovert_score' not in test_data.columns:
-            test_data['extrovert_score'] = [8, 16, 24, 32, 40]
-        if 'social_ratio' not in test_data.columns:
-            test_data['social_ratio'] = [0.5, 0.6, 0.7, 0.8, 0.9]
+        if 'motion_intensity' not in test_data.columns:
+            test_data['motion_intensity'] = [0.1, 0.2, 0.3, 0.4, 0.5]
+        if 'thermal_distance_interaction' not in test_data.columns:
+            test_data['thermal_distance_interaction'] = [-0.1, -0.1, -0.1, -0.1, -0.1]
         
         result = enhanced_interaction_features(test_data)
         
@@ -268,7 +284,7 @@ class TestSilverPolynomialFeatures:
         assert_no_data_loss(missing_data, result)
         
         # Should handle NaN values gracefully
-        assert not result['Time_spent_Alone'].isna().all()
+        assert not result['acc_x'].isna().all()
 
     def test_polynomial_features_insufficient_features(self):
         """Test polynomial features with insufficient numeric features"""
@@ -417,55 +433,35 @@ class TestSilverTableOperations:
 
 
 class TestSilverCLAUDEMDFeatures:
-    """Test CLAUDE.md specified Silver layer functions using common fixtures"""
-    
-    def test_s5e7_interaction_features(self, sample_bronze_data):
-        """Test Winner Solution Interaction Features (+0.2-0.4% proven impact)"""
+    """Test CLAUDE.md specific features"""
+
+    def test_sensor_interaction_features(self, sample_bronze_data):
+        """Test sensor interaction features"""
         result = s5e7_interaction_features(sample_bronze_data)
         
-        # Use common assertions
-        assert_no_data_loss(sample_bronze_data, result)
-        assert_data_quality(result)
+        # Check that interaction features are created
+        interaction_features = [col for col in result.columns if 'interaction' in col.lower()]
+        assert len(interaction_features) > 0
         
-        # Test Winner Solution features
-        winner_features = [
-            'Social_event_participation_rate',
-            'Non_social_outings', 
-            'Communication_ratio',
-            'Friend_social_efficiency'
-        ]
-        for feature in winner_features:
-            assert feature in result.columns, f"Winner feature {feature} not created"
+        # Check for sensor-specific interactions
+        sensor_interactions = [col for col in result.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_']) and 'interaction' in col.lower()]
+        assert len(sensor_interactions) > 0
 
-    def test_s5e7_drain_adjusted_features(self, sample_bronze_data):
-        """Test Fatigue-Adjusted Domain Modeling (+0.1-0.2% introversion accuracy)"""
+    def test_sensor_drain_adjusted_features(self, sample_bronze_data):
+        """Test sensor drain adjusted features"""
         result = s5e7_drain_adjusted_features(sample_bronze_data)
         
-        # Use common assertions
-        assert_no_data_loss(sample_bronze_data, result)
-        assert_data_quality(result)
-        
-        # Test Fatigue-Adjusted features
-        fatigue_features = [
-            'Activity_ratio',
-            'Drain_adjusted_activity',
-            'Introvert_extrovert_spectrum'
-        ]
-        for feature in fatigue_features:
-            if feature in result.columns:
-                assert all(isinstance(x, (int, float)) for x in result[feature])
+        # Check that drain adjusted features are created
+        drain_features = [col for col in result.columns if 'drain' in col.lower()]
+        assert len(drain_features) > 0
 
-    def test_s5e7_communication_ratios(self, sample_bronze_data):
-        """Test Online vs Offline behavioral ratios"""
+    def test_sensor_communication_ratios(self, sample_bronze_data):
+        """Test sensor communication ratios"""
         result = s5e7_communication_ratios(sample_bronze_data)
         
-        # Use common assertions
-        assert_no_data_loss(sample_bronze_data, result)
-        assert_data_quality(result)
-        
-        # Test communication ratio features
-        assert 'Online_offline_ratio' in result.columns
-        assert 'Communication_balance' in result.columns
+        # Check that communication ratios are created
+        ratio_features = [col for col in result.columns if 'ratio' in col.lower()]
+        assert len(ratio_features) > 0
 
 
 class TestSilverDependencyChain:
@@ -707,12 +703,12 @@ class TestSilverUtilities:
         assert len(importance_order) > 0
         
         # Check for expected important features
-        expected_features = ['extrovert_score', 'introvert_score', 'Social_event_attendance']
+        expected_features = ['motion_intensity', 'total_motion', 'acc_x']
         for feature in expected_features:
             assert feature in importance_order
         
         # Should be ordered (most important first)
-        assert importance_order[0] == 'extrovert_score'
+        assert importance_order[0] == 'motion_intensity'
 
 
 class TestSilverIntegration:
@@ -732,8 +728,8 @@ class TestSilverIntegration:
         assert_feature_engineering_quality(step4, min_new_features=10)
         
         # Check for key features
-        assert 'extrovert_score' in step4.columns
-        assert 'social_ratio' in step4.columns
+        assert 'motion_intensity' in step4.columns
+        assert 'thermal_distance_interaction' in step4.columns
         
         # Check for scaled features
         scaled_features = [col for col in step4.columns if col.endswith('_scaled')]

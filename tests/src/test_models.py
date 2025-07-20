@@ -236,21 +236,21 @@ class TestModelUtilities:
         assert 0 <= auc <= 1
 
     def test_prediction_statistics(self):
-        """予測統計情報のテスト"""
+        """予測統計情報のテスト（CMIセンサーデータ）"""
         predictions = np.array([0, 1, 1, 0, 1, 1, 0, 1])
 
         stats = {
             "total_predictions": len(predictions),
-            "extrovert_count": np.sum(predictions == 1),
-            "introvert_count": np.sum(predictions == 0),
-            "extrovert_ratio": np.mean(predictions == 1),
-            "introvert_ratio": np.mean(predictions == 0),
+            "behavior_count": np.sum(predictions == 1),
+            "no_behavior_count": np.sum(predictions == 0),
+            "behavior_ratio": np.mean(predictions == 1),
+            "no_behavior_ratio": np.mean(predictions == 0),
         }
 
         assert stats["total_predictions"] == 8
-        assert stats["extrovert_count"] == 5
-        assert stats["introvert_count"] == 3
-        assert abs(stats["extrovert_ratio"] + stats["introvert_ratio"] - 1.0) < 1e-10
+        assert stats["behavior_count"] == 5
+        assert stats["no_behavior_count"] == 3
+        assert abs(stats["behavior_ratio"] + stats["no_behavior_ratio"] - 1.0) < 1e-10
 
     def test_model_evaluation_metrics(self):
         """モデル評価指標のテスト"""
