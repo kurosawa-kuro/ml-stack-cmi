@@ -1,6 +1,7 @@
 """
-Silver Level Data Management
-Feature Engineering & Advanced Preprocessing
+Silver Level Data Management for CMI Sensor Data
+Time-Series Feature Engineering & Multimodal Sensor Fusion
+CLAUDE.md: FFT/Statistical Features (tsfresh), Multimodal Channel Fusion
 """
 
 from typing import Tuple, List, Dict, Any, Optional
@@ -9,10 +10,23 @@ import warnings
 import duckdb
 import numpy as np
 import pandas as pd
+from scipy import signal
+from scipy.fft import fft, fftfreq
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler, PowerTransformer
 from sklearn.impute import KNNImputer
 from sklearn.base import BaseEstimator, TransformerMixin
 from category_encoders import TargetEncoder
+
+# Optional tsfresh import for comprehensive time-series features
+try:
+    import tsfresh
+    from tsfresh import extract_features
+    from tsfresh.feature_extraction import ComprehensiveFCParameters, MinimalFCParameters
+    from tsfresh.utilities.dataframe_functions import impute
+    TSFRESH_AVAILABLE = True
+except ImportError:
+    TSFRESH_AVAILABLE = False
+    print("Warning: tsfresh not available. Install with: pip install tsfresh")
 
 DB_PATH = "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
 
@@ -23,11 +37,276 @@ warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow enc
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow encountered in reduce')
 
 
+def extract_time_series_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Time-series feature extraction for CMI sensor data (CLAUDE.md specification)
+    
+    Extracts features from multimodal sensor channels:
+    - IMU (accelerometer/gyroscope): Movement patterns
+    - ToF distance sensors: Proximity patterns  
+    - Thermopile: Temperature distribution
+    """
+    df = df.copy()
+    
+    # Define sensor channel groups based on CMI data structure
+    accelerometer_cols = [col for col in df.columns if col.startswith('acc_')]
+    gyroscope_cols = [col for col in df.columns if col.startswith('rot_')]
+    thermopile_cols = [col for col in df.columns if col.startswith('thm_')]
+    tof_cols = [col for col in df.columns if col.startswith('tof_')]
+    
+    # Statistical features for each sensor modality
+    for sensor_group, columns in [
+        ('imu_acc', accelerometer_cols),
+        ('imu_gyro', gyroscope_cols), 
+        ('thermal', thermopile_cols),
+        ('tof', tof_cols[:10])  # Limit ToF features due to high dimensionality
+    ]:
+        if columns:
+            sensor_data = df[columns]
+            
+            # Basic statistical features
+            df[f'{sensor_group}_mean'] = sensor_data.mean(axis=1)
+            df[f'{sensor_group}_std'] = sensor_data.std(axis=1).fillna(0)
+            df[f'{sensor_group}_min'] = sensor_data.min(axis=1)
+            df[f'{sensor_group}_max'] = sensor_data.max(axis=1)
+            df[f'{sensor_group}_range'] = df[f'{sensor_group}_max'] - df[f'{sensor_group}_min']
+            df[f'{sensor_group}_skew'] = sensor_data.skew(axis=1).fillna(0)
+            df[f'{sensor_group}_kurt'] = sensor_data.kurtosis(axis=1).fillna(0)
+            
+            # Energy and magnitude features (with overflow protection)
+            energy_values = (sensor_data ** 2).sum(axis=1)
+            df[f'{sensor_group}_energy'] = np.clip(energy_values, 0, 1e6)  # Prevent overflow
+            magnitude_values = np.sqrt((sensor_data ** 2).sum(axis=1))
+            df[f'{sensor_group}_magnitude'] = np.clip(magnitude_values, 0, 1e3)  # Prevent overflow
+            
+            # Cross-channel correlations (for multi-axis sensors)
+            if len(columns) >= 2:
+                try:
+                    corr_matrix = sensor_data.corr()
+                    upper_triangle = np.triu_indices_from(corr_matrix.values, k=1)
+                    df[f'{sensor_group}_corr_mean'] = corr_matrix.values[upper_triangle].mean()
+                except:
+                    df[f'{sensor_group}_corr_mean'] = 0
+                
+    # Multimodal sensor fusion features
+    if accelerometer_cols and gyroscope_cols:
+        # IMU sensor fusion (with overflow protection)
+        acc_magnitude = np.sqrt((df[accelerometer_cols] ** 2).sum(axis=1))
+        acc_magnitude = np.clip(acc_magnitude, 0, 1e3)  # Prevent overflow
+        gyro_magnitude = np.sqrt((df[gyroscope_cols] ** 2).sum(axis=1))
+        gyro_magnitude = np.clip(gyro_magnitude, 0, 1e3)  # Prevent overflow
+        df['imu_total_motion'] = np.clip(acc_magnitude + gyro_magnitude, 0, 2e3)
+        df['imu_motion_ratio'] = np.clip(acc_magnitude / (gyro_magnitude + 1e-8), 0, 100)
+        
+    if thermopile_cols and tof_cols:
+        # Thermal-distance interaction (with overflow protection)
+        thermal_mean = df[thermopile_cols].mean(axis=1)
+        thermal_mean = np.clip(thermal_mean, -100, 100)  # Prevent overflow
+        tof_mean = df[tof_cols[:5]].mean(axis=1)  # Use subset of ToF sensors
+        tof_mean = np.clip(tof_mean, 0, 1000)  # Prevent overflow
+        df['thermal_distance_interaction'] = np.clip(thermal_mean * tof_mean, -1e5, 1e5)
+        df['thermal_distance_ratio'] = np.clip(thermal_mean / (tof_mean + 1e-8), -100, 100)
+        
+    return df
+
+
+def extract_frequency_domain_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Frequency domain feature extraction using FFT (CLAUDE.md specification)
+    
+    Extracts spectral features for behavior pattern detection
+    """
+    df = df.copy()
+    
+    # Define sensor groups for frequency analysis
+    sensor_groups = {
+        'acc': [col for col in df.columns if col.startswith('acc_')],
+        'gyro': [col for col in df.columns if col.startswith('rot_')],
+        'thermal': [col for col in df.columns if col.startswith('thm_')]
+    }
+    
+    for group_name, columns in sensor_groups.items():
+        if columns:
+            for col in columns[:3]:  # Limit to prevent feature explosion
+                if col in df.columns:
+                    try:
+                        # FFT analysis
+                        signal_data = df[col].fillna(0).values
+                        if len(signal_data) > 1:
+                            fft_vals = np.abs(fft(signal_data))
+                            freqs = fftfreq(len(signal_data), d=1/50)  # 50Hz sampling rate
+                            
+                            # Spectral features
+                            positive_freqs = freqs[:len(freqs)//2]
+                            positive_fft = fft_vals[:len(fft_vals)//2]
+                            
+                            if np.sum(positive_fft) > 0:
+                                # Clip FFT values to prevent overflow
+                                positive_fft_clipped = np.clip(positive_fft, 0, 1e6)
+                                positive_freqs_clipped = np.clip(positive_freqs, 0, 1e3)
+                                
+                                df[f'{col}_spectral_centroid'] = np.clip(
+                                    np.sum(positive_freqs_clipped * positive_fft_clipped) / np.sum(positive_fft_clipped), 
+                                    0, 1e3
+                                )
+                                df[f'{col}_spectral_rolloff'] = np.clip(np.percentile(positive_fft_clipped, 85), 0, 1e6)
+                                df[f'{col}_spectral_flux'] = np.clip(np.mean(np.diff(positive_fft_clipped) ** 2), 0, 1e6)
+                                
+                                # Dominant frequency
+                                dominant_freq_idx = np.argmax(positive_fft_clipped)
+                                df[f'{col}_dominant_freq'] = np.clip(
+                                    positive_freqs_clipped[dominant_freq_idx] if dominant_freq_idx > 0 else 0, 
+                                    0, 1e3
+                                )
+                            else:
+                                df[f'{col}_spectral_centroid'] = 0
+                                df[f'{col}_spectral_rolloff'] = 0
+                                df[f'{col}_spectral_flux'] = 0
+                                df[f'{col}_dominant_freq'] = 0
+                            
+                    except Exception as e:
+                        print(f"Warning: FFT analysis failed for {col}: {e}")
+                        
+    return df
+
+
+def extract_tsfresh_features(df: pd.DataFrame, max_features: int = 50) -> pd.DataFrame:
+    """tsfresh-based statistical feature extraction (CLAUDE.md specification)
+    
+    Comprehensive time-series feature extraction with memory optimization
+    """
+    df = df.copy()
+    
+    if not TSFRESH_AVAILABLE:
+        print("Warning: tsfresh not available, skipping tsfresh features")
+        return df
+    
+    # Prepare data for tsfresh (requires specific format)
+    if 'sequence_id' not in df.columns:
+        df['sequence_id'] = df.index // 100  # Group into sequences
+        
+    if 'time_step' not in df.columns:
+        df['time_step'] = df.index % 100  # Time steps within sequence
+        
+    # Select key sensor columns for tsfresh (memory optimization)
+    sensor_cols = []
+    for prefix in ['acc_', 'rot_', 'thm_']:
+        matching_cols = [col for col in df.columns if col.startswith(prefix)]
+        sensor_cols.extend(matching_cols[:2])  # Limit to 2 per sensor type
+        
+    try:
+        # Configure tsfresh with minimal features to prevent memory issues
+        extraction_settings = MinimalFCParameters()
+        
+        tsfresh_features = {}
+        
+        # Process each sensor column separately to manage memory
+        for col in sensor_cols[:5]:  # Further limit for memory
+            if col in df.columns:
+                # Prepare data for this column
+                ts_data = df[['sequence_id', 'time_step', col]].copy()
+                ts_data = ts_data.dropna(subset=[col])
+                
+                if len(ts_data) > 10:  # Minimum data requirement
+                    try:
+                        # Extract features for this column
+                        features = extract_features(
+                            ts_data, 
+                            column_id='sequence_id',
+                            column_sort='time_step',
+                            column_value=col,
+                            default_fc_parameters=extraction_settings,
+                            disable_progressbar=True
+                        )
+                        
+                        # Add to tsfresh_features dict
+                        for feat_name in features.columns[:5]:  # Limit features per column
+                            clean_feat_name = f'tsfresh_{col}_{feat_name}'.replace(' ', '_').replace(',', '_')
+                            tsfresh_features[clean_feat_name] = features[feat_name].fillna(0)
+                            
+                    except Exception as e:
+                        print(f"Warning: tsfresh extraction failed for {col}: {e}")
+                        
+        # Add tsfresh features to dataframe
+        if tsfresh_features:
+            # Ensure all feature arrays have the same length as df
+            max_len = len(df)
+            for feat_name, feat_values in tsfresh_features.items():
+                if len(feat_values) < max_len:
+                    # Pad with last value or zero
+                    padded_values = np.full(max_len, feat_values.iloc[-1] if len(feat_values) > 0 else 0)
+                    padded_values[:len(feat_values)] = feat_values
+                    df[feat_name] = padded_values
+                else:
+                    df[feat_name] = feat_values[:max_len]
+                    
+    except Exception as e:
+        print(f"Warning: tsfresh feature extraction failed: {e}")
+        
+    return df
+
+
+def extract_behavior_specific_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Behavior-specific feature extraction for BFRB detection
+    
+    CLAUDE.md: Domain knowledge features for Body-Focused Repetitive Behaviors
+    """
+    df = df.copy()
+    
+    # Hand-to-face movement patterns (key for BFRB detection)
+    acc_cols = [col for col in df.columns if col.startswith('acc_')]
+    if acc_cols:
+        acc_data = df[acc_cols]
+        
+        # Movement intensity patterns (with overflow protection)
+        movement_intensity = np.sqrt((acc_data ** 2).sum(axis=1))
+        df['movement_intensity'] = np.clip(movement_intensity, 0, 1e3)
+        movement_smoothness = acc_data.diff().abs().sum(axis=1)
+        df['movement_smoothness'] = np.clip(movement_smoothness, 0, 1e3)
+        
+        # Repetitive motion detection (with overflow protection)
+        if len(acc_data) > 10:
+            movement_periodicity = acc_data.rolling(window=5, min_periods=1).std().mean(axis=1)
+            df['movement_periodicity'] = np.clip(movement_periodicity, 0, 100)
+            movement_regularity = 1 / (acc_data.rolling(window=5, min_periods=1).var().mean(axis=1) + 1e-8)
+            df['movement_regularity'] = np.clip(movement_regularity, 0, 100)
+            
+    # Distance-based features (ToF sensors for proximity detection)
+    tof_cols = [col for col in df.columns if col.startswith('tof_')][:10]  # Limit ToF features
+    if tof_cols:
+        tof_data = df[tof_cols]
+        
+        # Proximity patterns
+        df['proximity_mean'] = tof_data.mean(axis=1)
+        df['proximity_min'] = tof_data.min(axis=1) 
+        df['proximity_variance'] = tof_data.var(axis=1)
+        
+        # Face-contact indicators
+        proximity_threshold = tof_data.quantile(0.25, axis=1, numeric_only=True)
+        df['close_proximity_ratio'] = (tof_data.values < proximity_threshold.values.reshape(-1, 1)).mean(axis=1)
+        
+    # Temperature-based features (Thermopile for contact detection)
+    thermal_cols = [col for col in df.columns if col.startswith('thm_')]
+    if thermal_cols:
+        thermal_data = df[thermal_cols]
+        
+        # Temperature distribution patterns
+        df['thermal_mean'] = thermal_data.mean(axis=1)
+        df['thermal_gradient'] = thermal_data.max(axis=1) - thermal_data.min(axis=1)
+        
+        # Contact detection
+        thermal_threshold = thermal_data.quantile(0.75, axis=1, numeric_only=True)
+        df['thermal_contact_indicator'] = (thermal_data.values > thermal_threshold.values.reshape(-1, 1)).mean(axis=1)
+        
+    return df
+
+
 def advanced_features(df: pd.DataFrame) -> pd.DataFrame:
-    """高度な特徴量エンジニアリング - 30+ statistical & domain features"""
+    """Advanced feature engineering for CMI sensor data (CLAUDE.md specification)
+    
+    Silver Layer: Time-series Feature Engineering & Multimodal Sensor Fusion
+    """
     df = df.copy()
 
-    # Winner Solution features (from CLAUDE.md specifications) - Silver層で生成
+    # Legacy features (keeping for backward compatibility)
     if "Social_event_attendance" in df.columns and "Going_outside" in df.columns:
         df["social_participation_rate"] = (
             df["Social_event_attendance"] / (df["Going_outside"] + 1e-8)
@@ -153,6 +432,19 @@ def advanced_features(df: pd.DataFrame) -> pd.DataFrame:
         df["social_squared"] = df["Social_event_attendance"] ** 2
         df["social_log"] = np.log1p(df["Social_event_attendance"])
         df["social_percentage"] = df["Social_event_attendance"] / (df["Social_event_attendance"].max() + 1e-8)
+
+    # CMI-specific sensor feature engineering pipeline (CLAUDE.md specification)
+    # Step 1: Time-series statistical features
+    df = extract_time_series_features(df)
+    
+    # Step 2: Frequency domain features (FFT analysis)
+    df = extract_frequency_domain_features(df)
+    
+    # Step 3: Behavior-specific domain features
+    df = extract_behavior_specific_features(df)
+    
+    # Step 4: tsfresh comprehensive features (memory-optimized)
+    df = extract_tsfresh_features(df, max_features=50)
 
     return df
 
@@ -542,13 +834,27 @@ class LightGBMFeatureEngineer(BaseEstimator, TransformerMixin):
                 if col in X.columns:
                     col_data = X[col].dropna()
                     if len(col_data) > 0:
+                        # Skip sensor energy features that cause overflow
+                        if any(sensor_keyword in col.lower() for sensor_keyword in ['energy', 'magnitude', 'spectral', 'fft', 'tof_', 'acc_', 'rot_', 'thm_']):
+                            continue
+                            
                         skewness = col_data.skew()
                         if abs(skewness) > 0.5:  # Moderately skewed
-                            self.power_transformers[col] = PowerTransformer(
-                                method='yeo-johnson',
-                                standardize=False
-                            )
-                            self.power_transformers[col].fit(col_data.values.reshape(-1, 1))
+                            try:
+                                # Ultra-conservative clipping to prevent overflow
+                                col_data_clipped = col_data.clip(-10, 10)
+                                
+                                # Check if data is still valid after clipping
+                                if col_data_clipped.std() > 1e-8 and len(col_data_clipped.unique()) > 1:
+                                    self.power_transformers[col] = PowerTransformer(
+                                        method='yeo-johnson',
+                                        standardize=False
+                                    )
+                                    self.power_transformers[col].fit(col_data_clipped.values.reshape(-1, 1))
+                            except Exception as e:
+                                print(f"Warning: PowerTransformer fit failed for {col}: {e}")
+                                # Skip this feature if PowerTransformer fails
+                                continue
         
         return self
     
@@ -564,9 +870,16 @@ class LightGBMFeatureEngineer(BaseEstimator, TransformerMixin):
                 mask = X_transformed[col].notna()
                 if mask.sum() > 0:
                     try:
+                        # Ultra-conservative clipping to prevent overflow
+                        values_to_transform = X_transformed.loc[mask, col].values
+                        clipped_values = np.clip(values_to_transform, -10, 10)
+                        
                         transformed_values = transformer.transform(
-                            X_transformed.loc[mask, col].values.reshape(-1, 1)
+                            clipped_values.reshape(-1, 1)
                         ).flatten()
+                        
+                        # Additional clipping of transformed values to prevent overflow
+                        transformed_values = np.clip(transformed_values, -50, 50)
                         
                         # Create full-length array with NaN for missing values
                         power_col = np.full(len(X_transformed), np.nan)
