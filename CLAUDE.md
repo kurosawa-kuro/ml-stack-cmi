@@ -80,29 +80,42 @@ Sensor Data (50 Hz sampling):
 ### Core Workflow Commands (Makefile)
 ```bash
 # Setup and Installation
-make install              # Install basic dependencies
-make dev-install         # Install with dev tools (black, flake8, mypy)
-make setup               # Create directory structure
+make install              # Install dependencies
+make setup               # Initialize project environment
 
-# Code Quality
-make lint                # Check code quality (black, flake8, mypy)
-make format              # Format code with black
-make lint-fix            # Format and show results
-make test                # Run tests with pytest
+# Data Understanding & Quality
+make eda                 # Exploratory data analysis
+make data-check          # Data quality validation
 
-# Training Pipeline
-make train-fast-dev      # Fast development training
-make train-full-optimized # Full optimized training  
-make train-max-performance # Maximum performance training
+# Data Processing Pipeline
+make bronze              # Bronze layer: Clean and normalize
+make silver              # Silver layer: Feature engineering
+make gold                # Gold layer: ML-ready preparation
 
-# Validation and Prediction
+# Model Training
+make train-lgb           # Train LightGBM baseline
+make train-cnn           # Train 1D CNN model
+
+# Evaluation & Analysis
+make evaluate            # Comprehensive model evaluation
+make feature-importance  # Feature importance analysis
 make validate-cv         # Quick CV validation
-make predict-basic       # Basic submission prediction
-make predict-gold        # Gold submission prediction
 
-# Maintenance
-make clean               # Clean outputs, cache files
-make help                # Show available commands
+# Final Steps
+make ensemble            # Train ensemble model
+make submit              # Generate submission file
+
+# Week-based Workflows (Shortcuts)
+make week1-baseline      # Complete Week 1 pipeline
+make week2-deep-learning # Week 2 CNN training
+make week3-final         # Week 3 optimization
+
+# Code Quality & Maintenance
+make lint                # Check code quality
+make format              # Format code with black
+make test                # Run tests with pytest
+make clean               # Clean all outputs
+make help                # Show all commands
 ```
 
 ### Direct Script Execution
