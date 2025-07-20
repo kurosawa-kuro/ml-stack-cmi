@@ -540,7 +540,8 @@ def get_ml_ready_sequences(df: pd.DataFrame, target_col: str = "label") -> Tuple
     exclude_cols = [
         'id', 'participant_id', 'series_id', 'timestamp',
         target_col, f"{target_col}_encoded", f"{target_col}_binary",
-        'label', 'label_encoded', 'label_binary'
+        'label', 'label_encoded', 'label_binary',
+        'behavior', 'behavior_encoded', 'behavior_binary'
     ]
     
     feature_cols = []
@@ -784,7 +785,8 @@ def get_sensor_feature_names(df: pd.DataFrame, target_col: str = "label") -> Lis
     exclude_cols = [
         'id', 'participant_id', 'series_id', 'timestamp',
         target_col, f"{target_col}_encoded", f"{target_col}_binary",
-        'label', 'label_encoded', 'label_binary'
+        'label', 'label_encoded', 'label_binary',
+        'behavior', 'behavior_encoded', 'behavior_binary'
     ]
     
     feature_names = []
