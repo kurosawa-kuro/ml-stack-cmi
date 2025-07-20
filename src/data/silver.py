@@ -1,11 +1,13 @@
 """
 Silver Level Data Management for CMI Sensor Data
 Time-Series Feature Engineering & Multimodal Sensor Fusion
+Configuration-Driven Feature Engineering
 CLAUDE.md: FFT/Statistical Features (tsfresh), Multimodal Channel Fusion
 """
 
 from typing import Tuple, List, Dict, Any, Optional
 import warnings
+import logging
 
 import duckdb
 import numpy as np
@@ -17,18 +19,51 @@ from sklearn.impute import KNNImputer
 from sklearn.base import BaseEstimator, TransformerMixin
 from category_encoders import TargetEncoder
 
-# Optional tsfresh import for comprehensive time-series features
+# Configuration-driven imports
 try:
-    import tsfresh
-    from tsfresh import extract_features
-    from tsfresh.feature_extraction import ComprehensiveFCParameters, MinimalFCParameters
-    from tsfresh.utilities.dataframe_functions import impute
-    TSFRESH_AVAILABLE = True
+    from ..config import get_project_config
+    CONFIG_AVAILABLE = True
 except ImportError:
-    TSFRESH_AVAILABLE = False
-    print("Warning: tsfresh not available. Install with: pip install tsfresh")
+    try:
+        from config import get_project_config
+        CONFIG_AVAILABLE = True
+    except ImportError:
+        CONFIG_AVAILABLE = False
 
-DB_PATH = "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
+logger = logging.getLogger(__name__)
+
+# Configuration-driven tsfresh import
+def check_tsfresh_availability() -> bool:
+    """Check tsfresh availability based on configuration"""
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        tsfresh_enabled = config.data.tsfresh_enabled
+        if not tsfresh_enabled:
+            logger.info("tsfresh disabled by configuration")
+            return False
+    
+    try:
+        import tsfresh
+        from tsfresh import extract_features
+        from tsfresh.feature_extraction import ComprehensiveFCParameters, MinimalFCParameters
+        from tsfresh.utilities.dataframe_functions import impute
+        return True
+    except ImportError:
+        logger.warning("tsfresh not available. Install with: pip install tsfresh")
+        return False
+
+TSFRESH_AVAILABLE = check_tsfresh_availability()
+
+# Configuration-driven database path
+def get_db_path() -> str:
+    """Get database path from configuration"""
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        return config.data.source_path
+    else:
+        return "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
+
+DB_PATH = get_db_path()
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -110,11 +145,21 @@ def extract_time_series_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def extract_frequency_domain_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Frequency domain feature extraction using FFT (CLAUDE.md specification)
+    """Configuration-driven frequency domain feature extraction using FFT
     
-    Extracts spectral features for behavior pattern detection
+    Extracts spectral features for behavior pattern detection based on project configuration
     """
     df = df.copy()
+    
+    # Check if FFT features are enabled in configuration
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        fft_enabled = config.data.fft_enabled
+        if not fft_enabled:
+            logger.info("FFT features disabled by configuration")
+            return df
+        
+        logger.info(f"Extracting FFT features in {config.phase.value} phase")
     
     # Define sensor groups for frequency analysis
     sensor_groups = {
@@ -169,15 +214,32 @@ def extract_frequency_domain_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def extract_tsfresh_features(df: pd.DataFrame, max_features: int = 50) -> pd.DataFrame:
-    """tsfresh-based statistical feature extraction (CLAUDE.md specification)
+    """Configuration-driven tsfresh statistical feature extraction (CLAUDE.md specification)
     
-    Comprehensive time-series feature extraction with memory optimization
+    Comprehensive time-series feature extraction with memory optimization and configuration control
     """
     df = df.copy()
     
     if not TSFRESH_AVAILABLE:
-        print("Warning: tsfresh not available, skipping tsfresh features")
+        logger.warning("tsfresh not available, skipping tsfresh features")
         return df
+    
+    # Get tsfresh configuration
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        if not config.data.tsfresh_enabled:
+            logger.info("tsfresh disabled by configuration")
+            return df
+        
+        # Override max_features from configuration if available
+        configured_max_features = config.data.max_features
+        if configured_max_features:
+            max_features = configured_max_features
+            logger.info(f"Using configured max_features: {max_features}")
+        
+        logger.info(f"tsfresh extraction in {config.phase.value} phase with max_features={max_features}")
+    else:
+        logger.info(f"tsfresh extraction (fallback mode) with max_features={max_features}")
     
     # Prepare data for tsfresh (requires specific format)
     if 'sequence_id' not in df.columns:

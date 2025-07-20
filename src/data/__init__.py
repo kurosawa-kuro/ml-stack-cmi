@@ -10,7 +10,7 @@ import pandas as pd
 from .bronze import create_bronze_tables, load_bronze_data
 from .bronze import load_data as bronze_load_data
 from .bronze import quick_preprocess
-from .gold import create_gold_tables, create_submission, get_feature_names, get_ml_ready_data, load_gold_data
+from .gold import create_gold_tables, create_submission_format, get_sensor_feature_names, prepare_ml_ready_data, load_gold_data
 from .silver import advanced_features, create_silver_tables, load_silver_data, scaling_features
 
 
@@ -51,9 +51,9 @@ __all__ = [
     "load_bronze_data",
     "load_silver_data",
     "load_gold_data",
-    "get_ml_ready_data",
-    "create_submission",
-    "get_feature_names",
+    "prepare_ml_ready_data",
+    "create_submission_format",
+    "get_sensor_feature_names",
     "bronze_load_data",
     "quick_preprocess",
     "advanced_features",

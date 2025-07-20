@@ -1,9 +1,11 @@
 """Bronze Level Data Management for CMI Sensor Data
 Raw Sensor Data Standardization & Quality Assurance (Entry Point to Medallion Pipeline)
+Configuration-Driven Processing
 """
 
 from typing import Tuple, Dict, Any, Optional, List
 import warnings
+import logging
 
 import duckdb
 import pandas as pd
@@ -11,7 +13,30 @@ import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import IsolationForest
 
-DB_PATH = "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
+# Configuration-driven imports
+try:
+    from ..config import get_project_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    try:
+        from config import get_project_config
+        CONFIG_AVAILABLE = True
+    except ImportError:
+        CONFIG_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
+# Configuration-driven database path
+def get_db_path() -> str:
+    """Get database path from configuration"""
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        return config.data.source_path
+    else:
+        # Fallback to default path
+        return "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
+
+DB_PATH = get_db_path()
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -19,13 +44,28 @@ warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow encountered in multiply')
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow encountered in reduce')
 
-# CMI Sensor Data Configuration
-SENSOR_COLUMNS = {
-    'accelerometer': ['acc_x', 'acc_y', 'acc_z'],
-    'gyroscope': ['rot_w', 'rot_x', 'rot_y', 'rot_z'],
-    'thermopile': ['thm_1', 'thm_2', 'thm_3', 'thm_4', 'thm_5'],
-    'tof_sensors': [f'tof_{sensor}_v{channel}' for sensor in range(1, 6) for channel in range(64)]
-}
+# Configuration-driven sensor column definitions
+def get_sensor_columns() -> Dict[str, List[str]]:
+    """Get sensor column definitions from configuration"""
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        if hasattr(config.data, 'sensors'):
+            return {
+                'accelerometer': config.data.sensors.get('accelerometer', ['acc_x', 'acc_y', 'acc_z']),
+                'gyroscope': config.data.sensors.get('gyroscope', ['rot_w', 'rot_x', 'rot_y', 'rot_z']),
+                'thermopile': config.data.sensors.get('thermopile', ['thm_1', 'thm_2', 'thm_3', 'thm_4', 'thm_5']),
+                'tof_sensors': config.data.sensors.get('tof_sensors', [f'tof_{sensor}_v{channel}' for sensor in range(1, 6) for channel in range(64)])
+            }
+    
+    # Fallback to default configuration
+    return {
+        'accelerometer': ['acc_x', 'acc_y', 'acc_z'],
+        'gyroscope': ['rot_w', 'rot_x', 'rot_y', 'rot_z'],
+        'thermopile': ['thm_1', 'thm_2', 'thm_3', 'thm_4', 'thm_5'],
+        'tof_sensors': [f'tof_{sensor}_v{channel}' for sensor in range(1, 6) for channel in range(64)]
+    }
+
+SENSOR_COLUMNS = get_sensor_columns()
 
 # Metadata columns
 METADATA_COLUMNS = ['row_id', 'sequence_type', 'sequence_id', 'sequence_counter', 
@@ -36,18 +76,30 @@ TARGET_COLUMNS = ['behavior', 'gesture']
 
 
 def load_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Raw CMI sensor data access point - Single source entry to Medallion pipeline"""
-    conn = duckdb.connect(DB_PATH)
+    """Configuration-driven CMI sensor data loading - Entry point to Medallion pipeline"""
+    # Get database path from configuration
+    db_path = get_db_path()
+    
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        logger.info(f"Loading data in {config.phase.value} phase from {db_path}")
+    else:
+        logger.info(f"Loading data from {db_path} (fallback mode)")
+    
+    conn = duckdb.connect(db_path)
     try:
         train = conn.execute("SELECT * FROM cmi_detect_behavior_with_sensor_data.train").df()
         test = conn.execute("SELECT * FROM cmi_detect_behavior_with_sensor_data.test").df()
+        
+        logger.info(f"Loaded train: {train.shape}, test: {test.shape}")
+        
     except Exception as e:
-        print(f"Error loading CMI data: {e}")
+        logger.error(f"Error loading CMI data: {e}")
         raise
     finally:
         conn.close()
     
-    # Explicit dtype setting for sensor data optimization
+    # Configuration-driven dtype optimization
     train = _set_optimal_dtypes_cmi(train)
     test = _set_optimal_dtypes_cmi(test)
     
@@ -64,9 +116,13 @@ def _set_optimal_dtypes_cmi(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').astype('float32')
     
-    # ID column as int32
+    # ID column - handle mixed types safely
     if 'row_id' in df.columns:
-        df['row_id'] = df['row_id'].astype('int32')
+        try:
+            df['row_id'] = pd.to_numeric(df['row_id'], errors='coerce').astype('int32')
+        except (ValueError, TypeError):
+            # If conversion fails, keep as object type
+            df['row_id'] = df['row_id'].astype('object')
     
     # Categorical features - ensure object type for processing
     categorical_cols = [col for col in df.columns if col in METADATA_COLUMNS]
@@ -255,8 +311,25 @@ def create_sequence_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def advanced_missing_strategy_cmi(df: pd.DataFrame) -> pd.DataFrame:
-    """Missing value intelligence for CMI sensor data with LightGBM native handling"""
+    """Configuration-driven missing value strategy for CMI sensor data"""
     df = df.copy()
+    
+    # Get missing value configuration
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        create_indicators = getattr(config.data, 'missing_strategy', {}).get('create_indicators', True)
+        thm_5_threshold = getattr(config.data, 'missing_strategy', {}).get('thm_5_threshold', 0.06)
+        tof_5_threshold = getattr(config.data, 'missing_strategy', {}).get('tof_5_threshold', 0.06)
+        
+        logger.info(f"Missing value strategy - Indicators: {create_indicators}, Thresholds: thm_5={thm_5_threshold}, tof_5={tof_5_threshold}")
+    else:
+        create_indicators = True
+        thm_5_threshold = 0.06
+        tof_5_threshold = 0.06
+    
+    if not create_indicators:
+        logger.info("Missing value indicators disabled by configuration")
+        return df
     
     # Create missing flags for critical sensors
     sensor_groups = ['accelerometer', 'gyroscope', 'thermopile']
@@ -372,8 +445,8 @@ def create_bronze_tables() -> None:
     print(f"- bronze.train: {len(train_bronze)} rows, {len(train_bronze.columns)} columns")
     print(f"- bronze.test: {len(test_bronze)} rows, {len(test_bronze.columns)} columns")
     print(f"- Unique participants: {train_validation['schema_validation'].get('unique_subjects', 'N/A')}")
-    print(f"- Sensor columns: {train_validation['quality_metrics']['sensor_columns_count']}")
-    print(f"- Missing values (excl. ToF): {train_validation['quality_metrics']['missing_values_excluding_tof']}")
+    print(f"- Sensor columns: {train_validation['quality_metrics'].get('numeric_features_count', 'N/A')}")
+    print(f"- Missing values: {train_validation['quality_metrics'].get('missing_values', 'N/A')}")
     
     conn.close()
 

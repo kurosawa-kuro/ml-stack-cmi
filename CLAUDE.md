@@ -112,20 +112,27 @@ Sensor Data (50 Hz sampling):
 
 ## 【DEVELOPMENT COMMANDS】
 
-### Core Workflow Commands (Makefile)
+### Core Workflow Commands (Makefile) - Configuration-Driven
 ```bash
 # Setup and Installation
 make install              # Install dependencies
 make setup               # Initialize project environment
+make config-show          # Show current configuration
+make config-validate      # Validate configuration
 
 # Data Understanding & Quality
 make eda                 # Exploratory data analysis
 make data-check          # Data quality validation
 
-# Data Processing Pipeline
-make bronze              # Bronze layer: Clean and normalize
-make silver              # Silver layer: Feature engineering
-make gold                # Gold layer: ML-ready preparation
+# Data Processing Pipeline (Configuration-Driven)
+make bronze              # Bronze layer: Clean and normalize (Config-Driven)
+make silver              # Silver layer: Feature engineering (Config-Driven)
+make gold                # Gold layer: ML-ready preparation (Config-Driven)
+
+# Legacy Data Processing (Fallback)
+make bronze-legacy       # Legacy bronze processing
+make silver-legacy       # Legacy silver processing
+make gold-legacy         # Legacy gold processing
 
 # Model Training
 make train-lgb           # Train LightGBM baseline
@@ -141,7 +148,8 @@ make ensemble            # Train ensemble model
 make submit              # Generate submission file
 
 # Week-based Workflows (Shortcuts)
-make week1-baseline      # Complete Week 1 pipeline
+make week1-baseline      # Complete Week 1 pipeline (Config-Driven)
+make week1-baseline-legacy # Week 1 pipeline (Legacy)
 make week2-deep-learning # Week 2 CNN training
 make week3-final         # Week 3 optimization
 

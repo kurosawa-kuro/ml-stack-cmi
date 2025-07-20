@@ -1,10 +1,12 @@
 """
 Gold Layer Data Management for CMI Sensor Data
 ML-Ready Data Preparation with GroupKFold Support
+Configuration-Driven ML Pipeline
 CLAUDE.md: ML-ready sequences for LightGBM/CNN training with participant-based CV
 """
 
 from typing import Any, List, Optional, Tuple, Dict
+import logging
 
 import duckdb
 import numpy as np
@@ -14,11 +16,33 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import GroupKFold
 import warnings
 
+# Configuration-driven imports
+try:
+    from ..config import get_project_config
+    CONFIG_AVAILABLE = True
+except ImportError:
+    try:
+        from config import get_project_config
+        CONFIG_AVAILABLE = True
+    except ImportError:
+        CONFIG_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
+
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=UserWarning)
 
-DB_PATH = "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
+# Configuration-driven database path
+def get_db_path() -> str:
+    """Get database path from configuration"""
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        return config.data.source_path
+    else:
+        return "/home/wsl/dev/my-study/ml/ml-stack-cmi/data/kaggle_datasets.duckdb"
+
+DB_PATH = get_db_path()
 
 
 def clean_and_validate_sensor_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -87,10 +111,31 @@ def clean_and_validate_sensor_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def select_sensor_features(df: pd.DataFrame, target_col: str, k: int = 100, method: str = "combined") -> List[str]:
-    """Sensor-aware feature selection for CMI data (CLAUDE.md specification)
+    """Configuration-driven sensor-aware feature selection for CMI data (CLAUDE.md specification)
     
-    Prioritizes multimodal sensor features for BFRB detection
+    Prioritizes multimodal sensor features for BFRB detection with configuration control
     """
+    # Get feature selection configuration
+    if CONFIG_AVAILABLE:
+        config = get_project_config()
+        configured_k = config.data.max_features
+        if configured_k:
+            k = configured_k
+            logger.info(f"Using configured max_features: {k}")
+        
+        # Get selection method from configuration if available
+        try:
+            selection_config = getattr(config, 'features', {}).get('selection', {})
+            configured_method = selection_config.get('method', method)
+            if configured_method != method:
+                method = configured_method
+                logger.info(f"Using configured selection method: {method}")
+        except AttributeError:
+            # Fallback if features configuration is not available
+            logger.info(f"Using default selection method: {method}")
+        
+        logger.info(f"Feature selection in {config.phase.value} phase: k={k}, method={method}")
+    
     # Exclude ID and target columns
     exclude_cols = ['id', 'participant_id', 'series_id', target_col]
     if f"{target_col}_encoded" in df.columns:
@@ -103,6 +148,7 @@ def select_sensor_features(df: pd.DataFrame, target_col: str, k: int = 100, meth
             feature_cols.append(col)
     
     if len(feature_cols) <= k:
+        logger.info(f"Feature count ({len(feature_cols)}) <= max_features ({k}), using all features")
         return feature_cols
     
     # Prioritize sensor features for CMI competition

@@ -198,7 +198,7 @@ def validate_config_file(config_file: str = "config/project_config.yaml") -> boo
         logger.error("Missing 'phase' in project configuration")
         return False
     
-    valid_phases = ['baseline', 'optimization', ensemble']
+    valid_phases = ['baseline', 'optimization', 'ensemble']
     if project_config['phase'] not in valid_phases:
         logger.error(f"Invalid phase '{project_config['phase']}'. Must be one of: {valid_phases}")
         return False

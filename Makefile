@@ -16,6 +16,15 @@ setup:
 	mkdir -p logs cache
 	PYTHONPATH=. python3 scripts/setup/project_setup.py
 
+# Configuration management
+config-show:
+	@echo "📋 Showing current project configuration..."
+	PYTHONPATH=. python3 -c "from src.config import get_project_config; config = get_project_config(); print(f'Phase: {config.phase.value}'); print(f'Primary Algorithm: {config.algorithm_strategy.primary_algorithm}'); print(f'Target CV Score: {config.targets.cv_score}'); print(f'Enabled Algorithms: {config.algorithm_strategy.enabled_algorithms}')"
+
+config-validate:
+	@echo "🔍 Validating project configuration..."
+	PYTHONPATH=. python3 -c "from src.config import get_project_config; config = get_project_config(); warnings = config.validate_configuration(); print('Configuration validation complete'); [print(f'⚠️ {w}') for w in warnings] if warnings else print('✅ No configuration warnings')"
+
 # Data understanding and quality
 eda:
 	@echo "📊 Running exploratory data analysis..."
@@ -25,23 +34,41 @@ data-check:
 	@echo "🔍 Checking data quality..."
 	PYTHONPATH=. python3 scripts/setup/data_quality_check.py
 
-# Data processing pipeline
+# Data processing pipeline (Configuration-Driven)
 bronze:
-	@echo "🥉 Processing Bronze layer..."
-	PYTHONPATH=. python3 scripts/data_processing/bronze_layer.py
+	@echo "🥉 Processing Bronze layer (Configuration-Driven)..."
+	PYTHONPATH=. python3 scripts/data_processing/bronze_layer_config.py
 
 silver:
-	@echo "🥈 Processing Silver layer..."
-	PYTHONPATH=. python3 scripts/data_processing/silver_layer.py
+	@echo "🥈 Processing Silver layer (Configuration-Driven)..."
+	PYTHONPATH=. python3 scripts/data_processing/silver_layer_config.py
 
 gold:
-	@echo "🥇 Processing Gold layer..."
+	@echo "🥇 Processing Gold layer (Configuration-Driven)..."
+	PYTHONPATH=. python3 scripts/data_processing/gold_layer_config.py
+
+# Legacy data processing (fallback)
+bronze-legacy:
+	@echo "🥉 Processing Bronze layer (Legacy)..."
+	PYTHONPATH=. python3 scripts/data_processing/bronze_layer.py
+
+silver-legacy:
+	@echo "🥈 Processing Silver layer (Legacy)..."
+	PYTHONPATH=. python3 scripts/data_processing/silver_layer.py
+
+gold-legacy:
+	@echo "🥇 Processing Gold layer (Legacy)..."
 	PYTHONPATH=. python3 scripts/data_processing/gold_layer.py
 
 # Model training
 train-lgb:
 	@echo "🌳 Training LightGBM baseline..."
 	PYTHONPATH=. python3 scripts/training/train_lightgbm.py
+
+# Configuration-driven training
+train-lgb-config:
+	@echo "🌳 Training LightGBM baseline (Configuration-Driven)..."
+	PYTHONPATH=. python3 scripts/training/train_lightgbm_config.py
 
 train-cnn:
 	@echo "🧠 Training 1D CNN..."
@@ -98,13 +125,26 @@ clean:
 
 # Workflow shortcuts (common sequences)
 week1-baseline:
-	@echo "🎯 Running Week 1 baseline workflow..."
+	@echo "🎯 Running Week 1 baseline workflow (Configuration-Driven)..."
+	@echo "📋 Phase: baseline | Algorithm: lightgbm | Target: CV 0.50+"
 	$(MAKE) setup
+	$(MAKE) config-show
 	$(MAKE) eda
 	$(MAKE) data-check
 	$(MAKE) bronze
 	$(MAKE) silver
 	$(MAKE) gold
+	$(MAKE) train-lgb-config
+	$(MAKE) evaluate
+
+week1-baseline-legacy:
+	@echo "🎯 Running Week 1 baseline workflow (Legacy)..."
+	$(MAKE) setup
+	$(MAKE) eda
+	$(MAKE) data-check
+	$(MAKE) bronze-legacy
+	$(MAKE) silver-legacy
+	$(MAKE) gold-legacy
 	$(MAKE) train-lgb
 	$(MAKE) evaluate
 
@@ -126,18 +166,24 @@ help:
 	@echo "🚀 Setup & Initialization:"
 	@echo "  make install              - Install dependencies"
 	@echo "  make setup               - Initialize project environment"
+	@echo "  make config-show          - Show current configuration"
+	@echo "  make config-validate      - Validate configuration"
 	@echo ""
 	@echo "📊 Data Understanding:"
 	@echo "  make eda                 - Exploratory data analysis"
 	@echo "  make data-check          - Data quality validation"
 	@echo ""
-	@echo "⚙️  Data Processing (Medallion):"
-	@echo "  make bronze              - Clean and normalize data"
-	@echo "  make silver              - Feature engineering"
-	@echo "  make gold                - ML-ready preparation"
+	@echo "⚙️  Data Processing (Medallion - Configuration-Driven):"
+	@echo "  make bronze              - Clean and normalize data (Config-Driven)"
+	@echo "  make silver              - Feature engineering (Config-Driven)"
+	@echo "  make gold                - ML-ready preparation (Config-Driven)"
+	@echo "  make bronze-legacy       - Legacy bronze processing"
+	@echo "  make silver-legacy       - Legacy silver processing"
+	@echo "  make gold-legacy         - Legacy gold processing"
 	@echo ""
 	@echo "🤖 Model Training:"
 	@echo "  make train-lgb           - Train LightGBM baseline"
+	@echo "  make train-lgb-config    - Train LightGBM (Configuration-Driven)"
 	@echo "  make train-cnn           - Train 1D CNN model"
 	@echo ""
 	@echo "📈 Evaluation & Analysis:"
@@ -150,7 +196,8 @@ help:
 	@echo "  make submit              - Generate submission"
 	@echo ""
 	@echo "🔄 Week-based Workflows:"
-	@echo "  make week1-baseline      - Complete Week 1 pipeline"
+	@echo "  make week1-baseline      - Complete Week 1 pipeline (Config-Driven)"
+	@echo "  make week1-baseline-legacy - Week 1 pipeline (Legacy)"
 	@echo "  make week2-deep-learning - Week 2 CNN training"
 	@echo "  make week3-final         - Week 3 optimization"
 	@echo ""
