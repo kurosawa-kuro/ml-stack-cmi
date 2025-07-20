@@ -64,13 +64,32 @@ def load_trained_models_and_data():
     
     # Load feature data
     try:
-        from src.data.gold import get_ml_ready_data
-        X_train, y_train, X_test, groups = get_ml_ready_data()
+        from src.data.gold import load_gold_data
+        train_df, test_df = load_gold_data()
+        
+        # Prepare ML-ready data
+        if 'gesture' in train_df.columns:
+            target_col = 'gesture'
+        elif 'behavior' in train_df.columns:
+            target_col = 'behavior'
+        else:
+            print(f"  ✗ No target column found")
+            return lgb_models, None, None, None, None
+        
+        # Get feature columns
+        exclude_cols = ['row_id', 'sequence_id', 'sequence_type', 'sequence_counter', 
+                       'subject', 'orientation', 'phase', target_col, 'participant_id']
+        feature_cols = [col for col in train_df.columns 
+                       if col not in exclude_cols and train_df[col].dtype in ['float32', 'float64', 'int32', 'int64']]
+        
+        X_train = train_df[feature_cols].fillna(0)
+        y_train = train_df[target_col]
+        groups = train_df['participant_id']
         
         print(f"  ✓ Feature data: {X_train.shape}")
         print(f"  ✓ Feature names: {len(X_train.columns)}")
         
-        return lgb_models, X_train, y_train, X_test, groups
+        return lgb_models, X_train, y_train, test_df, groups
         
     except Exception as e:
         print(f"  ✗ Failed to load feature data: {e}")
@@ -288,10 +307,17 @@ def analyze_feature_correlations(X_train, plots_dir):
     from scipy.cluster.hierarchy import dendrogram, linkage
     from scipy.spatial.distance import squareform
     
-    distance_matrix = 1 - abs(corr_matrix)
-    linkage_matrix = linkage(squareform(distance_matrix), method='average')
-    dendro = dendrogram(linkage_matrix, labels=corr_matrix.columns, no_plot=True)
-    feature_order = dendro['leaves']
+    try:
+        distance_matrix = 1 - abs(corr_matrix)
+        # Ensure distance matrix is symmetric
+        distance_matrix = (distance_matrix + distance_matrix.T) / 2
+        linkage_matrix = linkage(squareform(distance_matrix), method='average')
+        dendro = dendrogram(linkage_matrix, labels=corr_matrix.columns, no_plot=True)
+        feature_order = dendro['leaves']
+    except Exception as e:
+        print(f"    ⚠️ Hierarchical clustering failed: {e}")
+        print(f"    ✓ Using original feature order")
+        feature_order = list(range(len(corr_matrix.columns)))
     
     # Reorder correlation matrix
     ordered_corr = corr_matrix.iloc[feature_order, feature_order]

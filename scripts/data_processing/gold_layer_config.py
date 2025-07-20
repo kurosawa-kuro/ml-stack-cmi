@@ -128,8 +128,21 @@ def main():
         
         # Create gold tables
         print("  6️⃣ Creating gold layer tables...")
-        # This would call create_gold_tables() if implemented
-        print("     ✓ Gold tables creation (placeholder)")
+        try:
+            # Save ML-ready data to gold tables
+            from src.data.gold import create_gold_tables
+            
+            # Prepare data for gold tables
+            train_gold = train_ml.copy()
+            test_gold = test_ml.copy()
+            
+            # Create gold tables
+            create_gold_tables()
+            print("     ✓ Gold tables created successfully")
+            
+        except Exception as e:
+            print(f"     ⚠️ Gold tables creation failed: {e}")
+            print("     ✓ Continuing with ML-ready data preparation")
         
         # Final summary
         print(f"\n✨ Gold Layer ML Preparation Complete!")

@@ -65,11 +65,12 @@ training:
     metric: "multi_logloss"
     num_class: 18  # CMI gesture classes
     boosting_type: "gbdt"
-    num_leaves: 31
-    learning_rate: 0.1
-    feature_fraction: 0.8
-    bagging_fraction: 0.8
-    bagging_freq: 5
+    num_leaves: 63  # Increased from 31 for better performance
+    learning_rate: 0.05  # Reduced from 0.1 for better generalization
+    feature_fraction: 0.9  # Increased from 0.8
+    bagging_fraction: 0.9  # Increased from 0.8
+    bagging_freq: 3  # Reduced from 5
+    min_data_in_leaf: 20  # Added for regularization
     verbose: -1
     random_state: 42
 
@@ -115,7 +116,7 @@ features:
   # Selection strategy
   selection:
     method: "sensor_priority"  # sensor_priority, statistical, mutual_info
-    max_features: 100
+    max_features: 300  # Increased from 100 to improve baseline performance
     
 evaluation:
   # Metrics configuration

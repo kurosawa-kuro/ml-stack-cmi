@@ -343,34 +343,49 @@ def extract_behavior_specific_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def advanced_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Advanced feature engineering for CMI sensor data"""
+    """Enhanced advanced feature engineering for CMI sensor data
+    
+    Comprehensive feature engineering pipeline with BFRB-specific optimizations
+    """
     df = df.copy()
     
-    # Extract time-series features
+    # Step 1: Basic time-series features
     df = extract_time_series_features(df)
     
-    # Extract frequency domain features
+    # Step 2: Frequency domain features
     df = extract_frequency_domain_features(df)
     
-    # Extract tsfresh features
+    # Step 3: tsfresh features (configuration-controlled)
     df = extract_tsfresh_features(df)
     
-    # Extract behavior-specific features
+    # Step 4: BFRB-specific features (NEW - High impact)
+    df = extract_bfrb_specific_features(df)
+    
+    # Step 5: Advanced statistical features (NEW - Enhanced)
+    df = extract_advanced_statistical_features(df)
+    
+    # Step 6: Cross-sensor features (NEW - Multimodal fusion)
+    df = extract_cross_sensor_features(df)
+    
+    # Step 7: Temporal pattern features (NEW - Time-series patterns)
+    df = extract_temporal_pattern_features(df)
+    
+    # Step 8: Legacy behavior-specific features
     df = extract_behavior_specific_features(df)
     
-    # Motion-based ratios
+    # Step 9: Enhanced motion-based ratios
     if "total_motion" in df.columns:
         df["motion_ratio"] = df["total_motion"] / (df["total_motion"].max() + 1e-8)
     
     if "motion_intensity" in df.columns:
         df["intensity_ratio"] = df["motion_intensity"] / (df["motion_intensity"].max() + 1e-8)
     
-    # Sensor fusion features
+    # Step 10: Enhanced sensor fusion features
     if "tof_mean" in df.columns and "thermal_mean" in df.columns:
         df["sensor_fusion_score"] = (df["tof_mean"] + df["thermal_mean"]) / 2
         df["sensor_balance"] = df["tof_mean"] / (df["thermal_mean"] + 1e-8)
     
-    # Statistical aggregation
+    # Step 11: Enhanced statistical aggregation
     sensor_columns = [col for col in df.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'tof_', 'thm_'])]
     if sensor_columns:
         df["sensor_mean"] = df[sensor_columns].mean(axis=1)
@@ -1119,3 +1134,366 @@ class EnhancedSilverPreprocessor(BaseEstimator, TransformerMixin):
             X_transformed = self.target_encoder.transform(X_transformed)
         
         return X_transformed
+
+
+def extract_bfrb_specific_features(df: pd.DataFrame) -> pd.DataFrame:
+    """BFRB特有の行動パターン検出に特化した特徴量エンジニアリング
+    
+    Body-Focused Repetitive Behaviors (BFRB) の検出に最適化された特徴量
+    - 手の動きパターン（顔への接近・離脱）
+    - 反復的な動作の検出
+    - 接触・非接触の判定
+    - 行動の持続時間と頻度
+    """
+    df = df.copy()
+    
+    # 1. 手の動きパターン検出（顔への接近・離脱）
+    if "acc_x" in df.columns and "acc_y" in df.columns and "acc_z" in df.columns:
+        # 手の動きの方向性を検出
+        df["hand_movement_direction"] = np.arctan2(df["acc_y"], df["acc_x"])
+        df["hand_movement_magnitude"] = np.sqrt(df["acc_x"]**2 + df["acc_y"]**2 + df["acc_z"]**2)
+        
+        # 手の動きの一貫性（反復動作の指標）
+        df["hand_movement_consistency"] = df["hand_movement_magnitude"].rolling(window=20, min_periods=1).std()
+        df["hand_movement_consistency"] = 1 / (df["hand_movement_consistency"] + 1e-8)
+        
+        # 手の動きの周期性（FFTベース）
+        try:
+            # 短時間での周期性を検出
+            window_size = min(50, len(df))
+            if window_size > 10:
+                fft_vals = np.abs(np.fft.fft(df["hand_movement_magnitude"].iloc[:window_size].fillna(0)))
+                dominant_freq = np.argmax(fft_vals[1:window_size//2]) + 1
+                df["hand_movement_periodicity"] = dominant_freq / window_size
+            else:
+                df["hand_movement_periodicity"] = 0
+        except:
+            df["hand_movement_periodicity"] = 0
+    
+    # 2. ToFセンサーによる顔への接近度検出
+    tof_columns = [col for col in df.columns if col.startswith("tof_")]
+    if tof_columns:
+        # 顔への接近度（距離の逆数）
+        df["face_proximity"] = 1 / (df[tof_columns].mean(axis=1) + 1e-8)
+        df["face_proximity"] = np.clip(df["face_proximity"], 0, 0.1)  # 最大10cm
+        
+        # 顔への接近パターン
+        df["face_approach_speed"] = df["face_proximity"].diff().fillna(0)
+        df["face_approach_acceleration"] = df["face_approach_speed"].diff().fillna(0)
+        
+        # 顔への接近頻度（閾値ベース）
+        proximity_threshold = df["face_proximity"].quantile(0.7)
+        df["face_approach_frequency"] = (df["face_proximity"] > proximity_threshold).rolling(window=10, min_periods=1).mean()
+    
+    # 3. 温度センサーによる接触検出
+    thermal_columns = [col for col in df.columns if col.startswith("thm_")]
+    if thermal_columns:
+        # 接触温度の検出
+        df["contact_temperature"] = df[thermal_columns].max(axis=1)
+        df["temperature_gradient"] = df["contact_temperature"].diff().fillna(0)
+        
+        # 接触の持続時間（温度上昇の持続）
+        df["contact_duration_indicator"] = (df["temperature_gradient"] > 0).rolling(window=5, min_periods=1).sum()
+        
+        # 接触強度（温度変化の大きさ）
+        df["contact_intensity"] = df["temperature_gradient"].rolling(window=10, min_periods=1).std()
+    
+    # 4. 反復動作の検出
+    if "hand_movement_magnitude" in df.columns:
+        # 動作の反復性（自己相関ベース）
+        try:
+            window_size = min(30, len(df))
+            if window_size > 10:
+                movement_series = df["hand_movement_magnitude"].iloc[:window_size].fillna(0)
+                autocorr = np.correlate(movement_series, movement_series, mode='full')
+                autocorr = autocorr[len(autocorr)//2:]
+                # 最初のピーク後の相関を反復性の指標とする
+                if len(autocorr) > 5:
+                    df["movement_repetitiveness"] = autocorr[5] / (autocorr[0] + 1e-8)
+                else:
+                    df["movement_repetitiveness"] = 0
+            else:
+                df["movement_repetitiveness"] = 0
+        except:
+            df["movement_repetitiveness"] = 0
+        
+        # 動作の一貫性（分散の逆数）
+        df["movement_consistency"] = 1 / (df["hand_movement_magnitude"].rolling(window=15, min_periods=1).var() + 1e-8)
+        df["movement_consistency"] = np.clip(df["movement_consistency"], 0, 100)
+    
+    # 5. 行動の持続時間と頻度
+    if "face_proximity" in df.columns and "contact_temperature" in df.columns:
+        # 行動の持続時間（接近+接触の組み合わせ）
+        behavior_condition = (df["face_proximity"] > df["face_proximity"].quantile(0.6)) & \
+                           (df["contact_temperature"] > df["contact_temperature"].quantile(0.5))
+        df["behavior_duration"] = behavior_condition.rolling(window=20, min_periods=1).sum()
+        
+        # 行動の頻度（単位時間あたりの行動回数）
+        df["behavior_frequency"] = behavior_condition.rolling(window=50, min_periods=1).mean()
+    
+    # 6. マルチモーダル融合特徴量
+    if all(col in df.columns for col in ["hand_movement_magnitude", "face_proximity", "contact_temperature"]):
+        # BFRB行動スコア（総合的な行動指標）
+        movement_score = df["hand_movement_magnitude"] / (df["hand_movement_magnitude"].max() + 1e-8)
+        proximity_score = df["face_proximity"] / (df["face_proximity"].max() + 1e-8)
+        contact_score = df["contact_temperature"] / (df["contact_temperature"].max() + 1e-8)
+        
+        df["bfrb_behavior_score"] = (movement_score * 0.4 + proximity_score * 0.35 + contact_score * 0.25)
+        
+        # 行動の複雑性（複数のセンサーの組み合わせ）
+        df["behavior_complexity"] = (movement_score * proximity_score * contact_score)
+        
+        # 行動の一貫性（複数センサーの相関）
+        sensor_scores = pd.DataFrame({
+            'movement': movement_score,
+            'proximity': proximity_score,
+            'contact': contact_score
+        })
+        df["sensor_correlation"] = sensor_scores.corr().iloc[0, 1]  # movementとproximityの相関
+    
+    # 7. 時間的特徴量
+    if "hand_movement_magnitude" in df.columns:
+        # 動作の時間的パターン
+        df["movement_temporal_pattern"] = df["hand_movement_magnitude"].rolling(window=25, min_periods=1).apply(
+            lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0
+        )
+        
+        # 動作の急激な変化
+        df["movement_sudden_change"] = df["hand_movement_magnitude"].diff().abs().rolling(window=5, min_periods=1).max()
+    
+    return df
+
+
+def extract_advanced_statistical_features(df: pd.DataFrame) -> pd.DataFrame:
+    """高度な統計的特徴量エンジニアリング
+    
+    従来の統計量を超えた、より洗練された特徴量を生成
+    """
+    df = df.copy()
+    
+    # 1. 分位点ベースの特徴量
+    sensor_columns = [col for col in df.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_'])]
+    if sensor_columns:
+        for col in sensor_columns[:10]:  # 上位10個のセンサーに限定
+            if col in df.columns and df[col].dtype in ['float64', 'float32', 'int64', 'int32']:
+                # 分位点ベースの特徴量
+                df[f"{col}_q10"] = df[col].rolling(window=20, min_periods=1).quantile(0.1)
+                df[f"{col}_q25"] = df[col].rolling(window=20, min_periods=1).quantile(0.25)
+                df[f"{col}_q75"] = df[col].rolling(window=20, min_periods=1).quantile(0.75)
+                df[f"{col}_q90"] = df[col].rolling(window=20, min_periods=1).quantile(0.9)
+                
+                # IQR（四分位範囲）
+                df[f"{col}_iqr"] = df[f"{col}_q75"] - df[f"{col}_q25"]
+                
+                # 歪度と尖度（より安定した計算）
+                try:
+                    df[f"{col}_skewness"] = df[col].rolling(window=30, min_periods=10).skew().fillna(0)
+                    df[f"{col}_kurtosis"] = df[col].rolling(window=30, min_periods=10).kurt().fillna(0)
+                except:
+                    df[f"{col}_skewness"] = 0
+                    df[f"{col}_kurtosis"] = 0
+    
+    # 2. 変化率ベースの特徴量
+    for col in sensor_columns[:10]:
+        if col in df.columns:
+            # 変化率
+            df[f"{col}_change_rate"] = df[col].pct_change().fillna(0)
+            
+            # 変化率の絶対値
+            df[f"{col}_abs_change_rate"] = df[f"{col}_change_rate"].abs()
+            
+            # 変化率の移動平均
+            df[f"{col}_change_rate_ma"] = df[f"{col}_change_rate"].rolling(window=10, min_periods=1).mean()
+    
+    # 3. 異常値検出ベースの特徴量
+    for col in sensor_columns[:10]:
+        if col in df.columns:
+            # Z-scoreベースの異常値
+            rolling_mean = df[col].rolling(window=50, min_periods=10).mean()
+            rolling_std = df[col].rolling(window=50, min_periods=10).std()
+            df[f"{col}_zscore"] = (df[col] - rolling_mean) / (rolling_std + 1e-8)
+            df[f"{col}_is_outlier"] = (df[f"{col}_zscore"].abs() > 2).astype(float)
+            
+            # 異常値の密度
+            df[f"{col}_outlier_density"] = df[f"{col}_is_outlier"].rolling(window=20, min_periods=1).mean()
+    
+    # 4. エントロピーベースの特徴量
+    for col in sensor_columns[:5]:  # 計算コストを考慮して5個に限定
+        if col in df.columns:
+            try:
+                # 離散化してエントロピーを計算
+                bins = pd.cut(df[col], bins=10, labels=False, duplicates='drop')
+                entropy_values = []
+                for i in range(len(df)):
+                    if i < 20:
+                        entropy_values.append(0)
+                    else:
+                        window_bins = bins[max(0, i-20):i+1]
+                        if len(window_bins) > 0:
+                            # エントロピー計算
+                            unique, counts = np.unique(window_bins, return_counts=True)
+                            probs = counts / len(window_bins)
+                            entropy = -np.sum(probs * np.log2(probs + 1e-8))
+                            entropy_values.append(entropy)
+                        else:
+                            entropy_values.append(0)
+                df[f"{col}_entropy"] = entropy_values
+            except:
+                df[f"{col}_entropy"] = 0
+    
+    return df
+
+
+def extract_cross_sensor_features(df: pd.DataFrame) -> pd.DataFrame:
+    """クロスセンサー特徴量エンジニアリング
+    
+    異なるセンサー間の相関や相互作用を捉える特徴量
+    """
+    df = df.copy()
+    
+    # 1. IMU-ToF相互作用
+    if "acc_x" in df.columns and "tof_1" in df.columns:
+        # 動きと距離の相互作用
+        df["motion_distance_interaction"] = df["acc_x"] * df["tof_1"]
+        df["motion_distance_ratio"] = df["acc_x"] / (df["tof_1"] + 1e-8)
+        
+        # 動きの方向と距離の関係
+        if "acc_y" in df.columns:
+            df["motion_direction_distance"] = np.arctan2(df["acc_y"], df["acc_x"]) * df["tof_1"]
+    
+    # 2. IMU-Thermal相互作用
+    if "acc_x" in df.columns and "thm_1" in df.columns:
+        # 動きと温度の相互作用
+        df["motion_temperature_interaction"] = df["acc_x"] * df["thm_1"]
+        df["motion_temperature_ratio"] = df["acc_x"] / (df["thm_1"] + 1e-8)
+    
+    # 3. ToF-Thermal相互作用
+    if "tof_1" in df.columns and "thm_1" in df.columns:
+        # 距離と温度の相互作用（接触検出）
+        df["distance_temperature_interaction"] = df["tof_1"] * df["thm_1"]
+        df["contact_probability"] = 1 / (df["tof_1"] + 1e-8) * df["thm_1"]
+        
+        # 接触の持続時間
+        contact_threshold = (df["tof_1"] < df["tof_1"].quantile(0.3)) & (df["thm_1"] > df["thm_1"].quantile(0.7))
+        df["contact_duration"] = contact_threshold.rolling(window=15, min_periods=1).sum()
+    
+    # 4. マルチモーダル融合スコア
+    sensor_scores = {}
+    
+    # IMUスコア
+    if "acc_x" in df.columns and "acc_y" in df.columns and "acc_z" in df.columns:
+        imu_magnitude = np.sqrt(df["acc_x"]**2 + df["acc_y"]**2 + df["acc_z"]**2)
+        sensor_scores["imu"] = imu_magnitude / (imu_magnitude.max() + 1e-8)
+    
+    # ToFスコア（距離の逆数）
+    tof_columns = [col for col in df.columns if col.startswith("tof_")]
+    if tof_columns:
+        tof_mean = df[tof_columns].mean(axis=1)
+        sensor_scores["tof"] = 1 / (tof_mean + 1e-8)
+        sensor_scores["tof"] = sensor_scores["tof"] / (sensor_scores["tof"].max() + 1e-8)
+    
+    # Thermalスコア
+    thermal_columns = [col for col in df.columns if col.startswith("thm_")]
+    if thermal_columns:
+        thermal_mean = df[thermal_columns].mean(axis=1)
+        sensor_scores["thermal"] = thermal_mean / (thermal_mean.max() + 1e-8)
+    
+    # 融合スコアの計算
+    if len(sensor_scores) >= 2:
+        # 重み付き平均
+        weights = {"imu": 0.4, "tof": 0.35, "thermal": 0.25}
+        fusion_score = sum(sensor_scores.get(sensor, 0) * weights.get(sensor, 0) 
+                          for sensor in sensor_scores.keys())
+        df["multimodal_fusion_score"] = fusion_score
+        
+        # センサー間の相関
+        if len(sensor_scores) >= 2:
+            sensor_df = pd.DataFrame(sensor_scores)
+            df["sensor_correlation"] = sensor_df.corr().iloc[0, 1] if len(sensor_df.columns) >= 2 else 0
+    
+    return df
+
+
+def extract_temporal_pattern_features(df: pd.DataFrame) -> pd.DataFrame:
+    """時間的パターン特徴量エンジニアリング
+    
+    時間的な変化パターンを捉える特徴量
+    """
+    df = df.copy()
+    
+    # 1. トレンド特徴量
+    sensor_columns = [col for col in df.columns if any(prefix in col for prefix in ['acc_', 'rot_', 'thm_', 'tof_'])]
+    for col in sensor_columns[:10]:
+        if col in df.columns:
+            # 線形トレンド
+            try:
+                df[f"{col}_trend"] = df[col].rolling(window=30, min_periods=10).apply(
+                    lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0
+                )
+            except:
+                df[f"{col}_trend"] = 0
+            
+            # 二次トレンド
+            try:
+                df[f"{col}_trend_quadratic"] = df[col].rolling(window=30, min_periods=10).apply(
+                    lambda x: np.polyfit(range(len(x)), x, 2)[0] if len(x) > 2 else 0
+                )
+            except:
+                df[f"{col}_trend_quadratic"] = 0
+    
+    # 2. 周期性特徴量
+    for col in sensor_columns[:5]:  # 計算コストを考慮
+        if col in df.columns:
+            try:
+                # 自己相関ベースの周期性
+                window_size = min(50, len(df))
+                if window_size > 10:
+                    series = df[col].iloc[:window_size].fillna(0)
+                    autocorr = np.correlate(series, series, mode='full')
+                    autocorr = autocorr[len(autocorr)//2:]
+                    
+                    # 最初のピーク後の相関を周期性の指標とする
+                    if len(autocorr) > 10:
+                        df[f"{col}_periodicity"] = autocorr[10] / (autocorr[0] + 1e-8)
+                    else:
+                        df[f"{col}_periodicity"] = 0
+                else:
+                    df[f"{col}_periodicity"] = 0
+            except:
+                df[f"{col}_periodicity"] = 0
+    
+    # 3. 変化点検出
+    for col in sensor_columns[:10]:
+        if col in df.columns:
+            # 変化点の検出（移動平均との乖離）
+            ma_short = df[col].rolling(window=5, min_periods=1).mean()
+            ma_long = df[col].rolling(window=20, min_periods=1).mean()
+            df[f"{col}_change_point"] = (ma_short - ma_long).abs()
+            
+            # 変化点の強度
+            df[f"{col}_change_intensity"] = df[f"{col}_change_point"].rolling(window=10, min_periods=1).max()
+    
+    # 4. 時系列の複雑性
+    for col in sensor_columns[:5]:
+        if col in df.columns:
+            try:
+                # サンプルエントロピー（時系列の複雑性）
+                window_size = 20
+                complexity_scores = []
+                for i in range(len(df)):
+                    if i < window_size:
+                        complexity_scores.append(0)
+                    else:
+                        window_data = df[col].iloc[i-window_size:i+1].values
+                        if len(window_data) > 0:
+                            # 簡易的な複雑性計算
+                            diff = np.diff(window_data)
+                            complexity = np.std(diff) / (np.mean(np.abs(diff)) + 1e-8)
+                            complexity_scores.append(complexity)
+                        else:
+                            complexity_scores.append(0)
+                df[f"{col}_complexity"] = complexity_scores
+            except:
+                df[f"{col}_complexity"] = 0
+    
+    return df

@@ -27,6 +27,10 @@ from src.data.silver import (
     extract_time_series_features,
     extract_frequency_domain_features,
     extract_tsfresh_features,
+    extract_bfrb_specific_features,
+    extract_advanced_statistical_features,
+    extract_cross_sensor_features,
+    extract_temporal_pattern_features,
     create_silver_tables,
     load_silver_data
 )
@@ -83,33 +87,57 @@ def main():
         train_bronze, test_bronze = load_bronze_data()
         print(f"     ✓ Train: {train_bronze.shape}, Test: {test_bronze.shape}")
         
-        # Time-series features (always enabled)
-        print("  2️⃣ Extracting time-series statistical features...")
+        # Enhanced time-series features (always enabled)
+        print("  2️⃣ Extracting enhanced time-series features...")
         train_features = extract_time_series_features(train_bronze)
         test_features = extract_time_series_features(test_bronze)
-        print(f"     ✓ Added statistical features: {train_features.shape[1] - train_bronze.shape[1]} new columns")
+        print(f"     ✓ Added basic statistical features: {train_features.shape[1] - train_bronze.shape[1]} new columns")
+        
+        # BFRB-specific features (NEW - High impact)
+        print("  3️⃣ Extracting BFRB-specific features...")
+        train_features = extract_bfrb_specific_features(train_features)
+        test_features = extract_bfrb_specific_features(test_features)
+        print(f"     ✓ Added BFRB-specific features: {train_features.shape[1] - train_bronze.shape[1]} total columns")
+        
+        # Advanced statistical features (NEW - Enhanced)
+        print("  4️⃣ Extracting advanced statistical features...")
+        train_features = extract_advanced_statistical_features(train_features)
+        test_features = extract_advanced_statistical_features(test_features)
+        print(f"     ✓ Added advanced statistical features: {train_features.shape[1] - train_bronze.shape[1]} total columns")
+        
+        # Cross-sensor features (NEW - Multimodal fusion)
+        print("  5️⃣ Extracting cross-sensor features...")
+        train_features = extract_cross_sensor_features(train_features)
+        test_features = extract_cross_sensor_features(test_features)
+        print(f"     ✓ Added cross-sensor features: {train_features.shape[1] - train_bronze.shape[1]} total columns")
+        
+        # Temporal pattern features (NEW - Time-series patterns)
+        print("  6️⃣ Extracting temporal pattern features...")
+        train_features = extract_temporal_pattern_features(train_features)
+        test_features = extract_temporal_pattern_features(test_features)
+        print(f"     ✓ Added temporal pattern features: {train_features.shape[1] - train_bronze.shape[1]} total columns")
         
         # FFT features (configuration-controlled)
         if config.data.fft_enabled:
-            print("  3️⃣ Extracting frequency domain features (FFT)...")
+            print("  7️⃣ Extracting frequency domain features (FFT)...")
             train_features = extract_frequency_domain_features(train_features)
             test_features = extract_frequency_domain_features(test_features)
             print(f"     ✓ Added FFT features: enabled by configuration")
         else:
-            print("  3️⃣ Skipping FFT features (disabled by configuration)")
+            print("  7️⃣ Skipping FFT features (disabled by configuration)")
         
         # tsfresh features (configuration-controlled)
         if config.data.tsfresh_enabled:
-            print("  4️⃣ Extracting tsfresh comprehensive features...")
+            print("  8️⃣ Extracting tsfresh comprehensive features...")
             print("     ⏳ This may take several minutes...")
             train_features = extract_tsfresh_features(train_features, max_features=config.data.max_features)
             test_features = extract_tsfresh_features(test_features, max_features=config.data.max_features)
             print(f"     ✓ Added tsfresh features: max_features={config.data.max_features}")
         else:
-            print("  4️⃣ Skipping tsfresh features (disabled by configuration)")
+            print("  8️⃣ Skipping tsfresh features (disabled by configuration)")
         
         # Create silver tables
-        print("  5️⃣ Creating silver layer tables...")
+        print("  9️⃣ Creating silver layer tables...")
         # This would call create_silver_tables() if implemented
         print("     ✓ Silver tables creation (placeholder)")
         

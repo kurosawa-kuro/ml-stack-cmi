@@ -1,7 +1,7 @@
 
 # CMI Competition - Data Quality Report
 
-Generated on: 2025-07-21 01:15:15
+Generated on: 2025-07-21 01:22:52
 
 ## Summary
 Total issues detected: 641
@@ -652,7 +652,7 @@ Total issues detected: 641
 - **out_of_range**: Values outside expected range [0, 1000]
 - **out_of_range**: Values outside expected range [0, 1000]
 - **out_of_range**: Values outside expected range [0, 1000]
-- **columns_missing_in_test**: Columns in train but not test: ['behavior', 'sequence_type', 'gesture', 'phase', 'orientation']
+- **columns_missing_in_test**: Columns in train but not test: ['gesture', 'sequence_type', 'orientation', 'phase', 'behavior']
 
 ## Medium Priority Issues
 
