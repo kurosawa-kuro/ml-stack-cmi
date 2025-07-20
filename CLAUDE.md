@@ -238,62 +238,168 @@ make format              # black code formatting
 - Over-focusing on one modality (e.g., IMU only)
 - Not handling missing ToF/Thermal values properly
 
-## 【BRONZE MEDAL ROADMAP】5-Week Plan
+## 【BRONZE MEDAL ROADMAP】5-Week Detailed Plan
 
 ### Week 1: Foundation & Baseline (Target: LB 0.50+)
-1. **EDA & Sensor Understanding**
-   - Channel-wise statistics and distributions
-   - Label frequency analysis
-   - Participant/session data quality
 
-2. **Bronze Layer Implementation**
-   - Sensor normalization pipeline
-   - Missing value strategies
-   - GroupKFold CV setup
+#### Day 1-2: Data Understanding & EDA
+**Data Structure Analysis:**
+- Analyze train.csv, test.csv structure and memory usage
+- Understand sensor channel meanings:
+  - IMU (accelerometer/gyroscope): Body movement detection
+  - ToF: Hand-to-face distance measurement  
+  - Thermopile: Temperature distribution (facial contact detection)
 
-3. **Quick Baseline**
-   - tsfresh features + LightGBM
-   - Simple sliding window approach
+**Statistical Analysis:**
+- Verify sensor value ranges and distributions
+- Analyze missing value patterns (especially ToF/temperature sensors)
+- Check participant data volume consistency
+- Evaluate behavior label distribution and class imbalance
 
-### Week 2: Deep Learning Integration (Target: LB 0.57-0.60)
-1. **1D CNN Implementation**
-   - InceptionTime or similar architecture
-   - Single-modal (IMU only) baseline
-   
-2. **Data Augmentation**
-   - Time shifting
-   - Rotation augmentation (IMU)
-   - Noise injection
+**Time-Series Visualization:**
+- Plot sensor waveform patterns for each behavior class
+- Validate 50Hz sampling rate consistency
+- Assess noise levels across sensor modalities
 
-3. **GPU Optimization**
-   - Batch processing
-   - Mixed precision training
+#### Day 3-4: Preprocessing Pipeline
+**Data Cleaning:**
+- Implement anomaly detection and handling strategies
+- Missing value handling:
+  - IMU: Linear interpolation
+  - ToF/Temperature: Zero-fill or forward fill
+- Validate timestamp continuity
 
-### Week 3: Multimodal Fusion (Target: LB 0.62+)
-1. **Multi-Branch Architecture**
-   - Separate branches for IMU/ToF/Thermal
-   - Feature-level fusion
-   
-2. **Advanced Features**
-   - Cross-modal correlations
-   - Attention mechanisms
-   
-3. **Ensemble Strategy**
-   - 5-fold × multi-seed
-   - Model diversity (CNN + Tree-based)
+**Normalization:**
+- Z-score normalization for IMU data
+- Compare participant-level vs global normalization
+- Define sensor-specific normalization strategies
 
-### Week 4-5: Optimization & Robustness
-1. **Feature Selection**
-   - Channel importance analysis
-   - Inference speed optimization
-   
-2. **Metric Optimization**
-   - Binary vs Multi-class weighting
-   - Threshold tuning
-   
-3. **Private LB Preparation**
-   - CV-LB alignment
-   - Robust validation strategies
+**Segmentation:**
+- Fixed window segmentation (e.g., 2-second = 100 samples)
+- 50% overlap for training data
+- Label assignment strategy (majority vote or center value)
+
+#### Day 5-6: Feature Engineering
+**tsfresh Integration:**
+- Install and configure tsfresh with ComprehensiveFCParameters
+- Monitor computation time and memory usage
+- Extract comprehensive time-series features
+
+**Statistical Features:**
+- Window-based statistics (mean, std, min/max)
+- Cross-sensor correlation features
+- Rate of change and jerk (acceleration derivative)
+
+**Frequency Domain:**
+- FFT-based spectral features
+- Power spectral density analysis
+- Dominant frequency component extraction
+
+#### Day 7: Baseline Model Construction
+**GroupKFold Implementation:**
+- Participant-based group splitting to prevent leakage
+- 5-fold configuration with data leak verification
+- Validate class distribution across folds
+
+**LightGBM Baseline:**
+- Basic parameter configuration
+- Separate Binary/Multiclass model construction
+- Implement evaluation metrics (F1 score calculation)
+
+**Initial Submission:**
+- Generate predictions and create submission.csv
+- Submit to Kaggle and verify score
+
+### Week 2: Model Enhancement (Target: LB 0.57-0.60)
+
+#### Day 8-9: 1D CNN Implementation
+**Data Preparation:**
+- Convert to 3D array format (samples, timesteps, channels)
+- Create memory-efficient batch generators
+- Implement train/validation data loaders
+
+**InceptionTime Architecture:**
+- Implement Inception modules with residual connections
+- Multi-scale convolution layers
+- Configure for multimodal sensor input
+
+**Training Configuration:**
+- Loss function selection (consider focal loss for imbalance)
+- Learning rate scheduler implementation
+- Early stopping with validation monitoring
+
+#### Day 10-11: Data Augmentation
+**Time-Series Augmentation:**
+- Temporal shifting (±0.5 seconds)
+- Gaussian noise injection
+- Speed variation (1.1x, 0.9x scaling)
+
+**Sensor-Specific Augmentation:**
+- IMU: Rotation transformations (handle left/right hand differences)
+- ToF: Distance scaling (individual differences)
+- Temperature: Offset addition for thermal variations
+
+#### Day 12-13: Hybrid Prediction Strategy
+**Two-Stage Prediction:**
+- Stage 1: Binary classification (behavior present/absent)
+- Stage 2: Multiclass classification for detected behaviors
+- Threshold optimization for stage transition
+
+**Feature Specialization:**
+- Binary-focused: Overall movement presence indicators
+- Multiclass-focused: Detailed behavioral pattern features
+
+#### Day 14: Intermediate Evaluation
+**Error Analysis:**
+- Detailed confusion matrix analysis
+- Identify misclassification patterns
+- Evaluate per-participant performance variations
+
+**Improvement Identification:**
+- Target specific behavior classes for accuracy improvement
+- Feature importance analysis
+- Overfitting detection and mitigation
+
+### Week 3: Multimodal Integration (Target: LB 0.62+)
+
+#### Day 15-16: Multi-Branch Architecture
+**Sensor-Specific Branches:**
+- IMU branch: Movement detection specialization
+- ToF branch: Distance pattern analysis
+- Temperature branch: Contact detection focus
+
+**Fusion Strategies:**
+- Compare early vs late fusion approaches
+- Implement attention mechanisms for sensor weighting
+- Learn optimal branch weight combinations
+
+#### Day 17-18: Ensemble Construction
+**Model Diversity:**
+- tsfresh + LightGBM baseline
+- Multiple 1D CNN configurations
+- Additional tree-based models (XGBoost/CatBoost)
+
+**Ensemble Methods:**
+- Simple averaging across models
+- CV score-based weighted averaging
+- Consider stacking for meta-learning
+
+#### Day 19-20: Final Optimization
+**Hyperparameter Tuning:**
+- Optuna-based automatic optimization
+- Learning rate and regularization tuning
+- Ensemble weight optimization
+
+**Test Time Augmentation (TTA):**
+- Time-shift TTA for robust predictions
+- Multi-prediction averaging
+- Confidence-based prediction weighting
+
+#### Day 21: Final Submission Preparation
+**Code Optimization:**
+- Remove unnecessary code and optimize runtime
+- Verify reproducibility across runs
+- Document final implementation approach
 
 ## 【SUCCESS CRITERIA】
 - **Bronze Medal**: Achieve LB 0.60+ (top 60% of ~360 teams)
